@@ -1,0 +1,67 @@
+syntax = "proto3";
+
+package phonemes;
+
+option java_multiple_files = true;
+option java_package = "org.example.voicingbackend.phonemes";
+option java_outer_classname = "PhonemeProto";
+
+service PhonemeService {
+  rpc GetPhonemes (PhonemeRequest) returns (PhonemeResponse);
+}
+
+message LexiconEntry {
+  repeated string phonemes = 1;
+}
+
+message ProsodyOptions {
+  int32 comma_sp = 1;
+  int32 period_sp = 2;
+  int32 semicolon_sp = 3;
+  int32 colon_sp = 4;
+  int32 dash_sp = 5;       // -, —
+  int32 paren_sp = 6;      // ( )
+  int32 ellipsis_sp = 7;   // … or ...
+  bool emit_boundaries = 8;
+  string boundary_minor_token = 9;
+  string boundary_major_token = 10;
+}
+
+message DialectFeatures {
+  bool th_stopping = 1;              // /θ/→[t], /ð/→[d]
+  bool diphthong_simplification = 2; // EY→EH, OW→AO
+  bool vowel_mergers = 3;            // /æ/→/ɛ/
+  bool cluster_simplification = 4;   // Final consonant clusters
+  bool reduce_stress = 5;            // For syllable-timed rhythm
+}
+
+message OutputConfig {
+  bool strip_stress = 1;
+  map<string, string> phone_map = 2; // map ARPAbet->target phone set
+  bool emit_ipa = 3;                 // if true, return IPA string in response
+  string ipa_lang = 4;               // e.g., "en-us" or "en-gb"
+  string dialect = 5;                // e.g., "en-ng" for Nigerian English
+  DialectFeatures dialect_features = 6; // Fine-grained dialect control
+}
+
+message VariantOptions {
+  int32 variant_index = 1;        // -1 for auto
+  bool enable_pos_heuristic = 2;  // optional; ignored if POS unavailable
+}
+
+message PhonemeRequest {
+  string text = 1;
+  ProsodyOptions prosody = 2;
+  OutputConfig output = 3;
+  VariantOptions variant = 4;
+  map<string, LexiconEntry> override_lexicon = 5; // lowercased keys
+}
+
+message PhonemeResponse {
+  repeated string phonemes = 1;
+  int32 oov_count = 2;
+  repeated string oov_words = 3;
+  string ipa = 4;                    // optional IPA transcription
+}
+
+

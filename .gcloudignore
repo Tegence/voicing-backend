@@ -1,0 +1,13 @@
+# Ignore large model files - they're loaded from GCS
+src/main/resources/*.onnx
+src/main/resources/*.pt
+
+# Standard ignores
+.git
+.gitignore
+.idea
+.vscode
+target
+*.class
+*.jar
+*.log

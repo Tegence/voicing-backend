@@ -1,0 +1,353 @@
+syntax = "proto3";
+
+package org.example.voicingbackend.audiomodel;
+
+option java_multiple_files = true;
+option java_package = "org.example.voicingbackend.audiomodel";
+option java_outer_classname = "AudioModelProto";
+
+// Service for audio model operations (speaker embedding)
+service AudioModelService {
+  // Authentication methods
+  rpc RegisterUser (RegisterUserRequest) returns (RegisterUserResponse);
+  rpc LoginUser (LoginUserRequest) returns (LoginUserResponse);
+  rpc ValidateToken (ValidateTokenRequest) returns (ValidateTokenResponse);
+  
+  // Load a PyTorch audio model from a file path
+  rpc LoadModel (LoadModelRequest) returns (LoadModelResponse);
+  
+  // Process audio waveform to extract speaker embedding
+  rpc ProcessAudio (ProcessAudioRequest) returns (ProcessAudioResponse);
+  
+  // Save audio to Google Cloud Storage
+  rpc SaveAudioToGCS (SaveAudioRequest) returns (SaveAudioResponse);
+  
+  // Suppress background from incoming audio
+  rpc SuppressBackground (SuppressBackgroundRequest) returns (SuppressBackgroundResponse);
+
+  // Extract embeddings over windows of 500ms with 250ms overlap; VAD filters silence
+  rpc ExtractEmbeddings (ExtractEmbeddingsRequest) returns (ExtractEmbeddingsResponse);
+
+  // Enrol a user's voice: store audio in S3 and persist non-silent embeddings
+  rpc EnrolUserVoice (EnrolUserVoiceRequest) returns (EnrolUserVoiceResponse);
+
+  // Transcribe an audio file using OpenAI
+  rpc TranscribeAudio (TranscribeAudioRequest) returns (TranscribeAudioResponse);
+
+  // Convert input text to phonemes
+  rpc TextToPhoneme (TextToPhonemeRequest) returns (TextToPhonemeResponse);
+
+  // Text to Speech synthesis using FastSpeech2 + HiFiGAN
+  rpc TextToSpeech (TextToSpeechRequest) returns (TextToSpeechResponse);
+
+  // Generate a coherent sentence of target length (20-25 words)
+  rpc GenerateSentence (GenerateSentenceRequest) returns (GenerateSentenceResponse);
+
+  // Generate a juxtaposition of N random words (e.g., 7 words)
+  rpc GenerateJuxtaposition (GenerateJuxtapositionRequest) returns (GenerateJuxtapositionResponse);
+
+  // Verify a user's voice; returns similarity percentage and verification flag
+  rpc VerifyUser (VerifyUserRequest) returns (VerifyUserResponse);
+  
+  // Get model information
+  rpc GetModelInfo (GetModelInfoRequest) returns (GetModelInfoResponse);
+  
+  // Unload the current model
+  rpc UnloadModel (UnloadModelRequest) returns (UnloadModelResponse);
+}
+
+// User registration request
+message RegisterUserRequest {
+  string username = 1;
+  string email = 2;
+  string password = 3;
+  string full_name = 4;
+}
+
+// User registration response
+message RegisterUserResponse {
+  bool success = 1;
+  string message = 2;
+  string user_id = 3;
+  string token = 4;
+}
+
+// User login request
+message LoginUserRequest {
+  string username = 1;
+  string password = 2;
+}
+
+// User login response
+message LoginUserResponse {
+  bool success = 1;
+  string message = 2;
+  string user_id = 3;
+  string token = 4;
+  UserInfo user_info = 5;
+}
+
+// Token validation request
+message ValidateTokenRequest {
+  string token = 1;
+}
+
+// Token validation response
+message ValidateTokenResponse {
+  bool valid = 1;
+  string user_id = 2;
+  string username = 3;
+  string message = 4;
+}
+
+// User information
+message UserInfo {
+  string user_id = 1;
+  string username = 2;
+  string email = 3;
+  string full_name = 4;
+  int64 created_at = 5;
+  int64 last_login = 6;
+}
+
+// Request to load a model
+message LoadModelRequest {
+  string model_path = 1;
+  ModelConfig config = 2;
+}
+
+// Response after loading a model
+message LoadModelResponse {
+  bool success = 1;
+  string message = 2;
+  ModelInfo model_info = 3;
+}
+
+// Request to process audio data
+message ProcessAudioRequest {
+  repeated float audio_samples = 1;  // Raw audio waveform samples
+  int32 sample_rate = 2;            // Sample rate (e.g., 16000 for 16kHz)
+  int64 timestamp = 3;
+}
+
+// Response with processed audio data
+message ProcessAudioResponse {
+  bool success = 1;
+  repeated float embedding = 2;      // Speaker embedding vector (512 dimensions)
+  float confidence = 3;             // Confidence score
+  string error_message = 4;
+}
+
+// Request to save audio to Google Cloud Storage
+message SaveAudioRequest {
+  repeated float audio_samples = 1;  // Raw audio waveform samples
+  int32 sample_rate = 2;            // Sample rate (e.g., 16000 for 16kHz)
+  string bucket_name = 3;           // GCS bucket name
+  string file_name = 4;             // File name in the bucket
+  AudioFormat format = 5;           // Audio format (WAV, MP3, etc.)
+  map<string, string> metadata = 6; // Additional metadata
+  int64 timestamp = 7;
+}
+
+// Response after saving audio
+message SaveAudioResponse {
+  bool success = 1;
+  string gcs_uri = 2;               // GCS URI of the saved file
+  string file_name = 3;             // File name in the bucket
+  int64 file_size_bytes = 4;        // Size of the saved file
+  string error_message = 5;
+}
+
+// Audio format options
+enum AudioFormat {
+  WAV = 0;
+  MP3 = 1;
+  FLAC = 2;
+  OGG = 3;
+  RAW = 4;
+}
+
+// Request to suppress background from audio
+message SuppressBackgroundRequest {
+  repeated float audio_samples = 1;  // Raw audio waveform samples
+  int32 sample_rate = 2;             // Sample rate (e.g., 16000)
+  bool return_background = 3;        // Whether to return background estimate
+  int64 timestamp = 4;
+}
+
+// Response with foreground (speech) and optional background
+message SuppressBackgroundResponse {
+  bool success = 1;
+  repeated float foreground_samples = 2;   // Cleaned audio
+  repeated float background_samples = 3;   // Estimated background (optional)
+  string error_message = 4;
+}
+
+message ExtractEmbeddingsRequest {
+  repeated float audio_samples = 1;
+  int32 sample_rate = 2;
+  int64 timestamp = 3;
+  string user_id = 4;   // required for storage
+  string audio_id = 5;  // optional logical id of the audio/recording
+}
+
+message EmbeddingChunk {
+  int64 start_ms = 1;
+  int64 end_ms = 2;
+  repeated float vector = 3; // L2-normalized speaker embedding
+}
+
+message ExtractEmbeddingsResponse {
+  bool success = 1;
+  repeated EmbeddingChunk chunks = 2;
+  string error_message = 3;
+}
+
+message VerifyUserRequest {
+  string user_id = 1;              // user to verify against
+  repeated float audio_samples = 2; // audio to verify
+  int32 sample_rate = 3;
+}
+
+message VerifyUserResponse {
+  bool success = 1;
+  float score = 2;           // cosine similarity in [0,1]
+  float percentage = 3;      // score * 100
+  bool verified = 4;         // percentage >= threshold
+  string error_message = 5;
+}
+
+message EnrolUserVoiceRequest {
+  string user_id = 1;
+  string audio_id = 2;                 // optional logical id/name
+  repeated float audio_samples = 3;
+  int32 sample_rate = 4;
+  AudioFormat store_format = 5;        // default WAV
+}
+
+message EnrolUserVoiceResponse {
+  bool success = 1;
+  string s3_uri = 2;
+  int32 chunks_stored = 3;             // number of embedding windows saved
+  string error_message = 4;
+}
+
+message TranscribeAudioRequest {
+  bytes file_content = 1;    // Raw file bytes (WAV/MP3/FLAC/OGG)
+  string file_name = 2;      // File name with extension (used for content-type)
+  string model = 3;          // e.g., "whisper-1"; default if empty
+  map<string, string> options = 4; // optional provider-specific params
+}
+
+message TranscribeAudioResponse {
+  bool success = 1;
+  string text = 2;
+  string error_message = 3;
+}
+
+// Text to phoneme
+enum PhonemeFormat {
+  ARPABET = 0; // e.g., HH AH L OW
+  IPA     = 1; // e.g., həˈloʊ
+}
+
+message TextToPhonemeRequest {
+  string text = 1;
+  string language = 2; // ISO code like "en"; defaults to config
+  PhonemeFormat format = 3; // default ARPABET
+  string dialect = 4;  // e.g., "en-ng" for Nigerian English
+}
+
+message PhonemeSequence {
+  string token = 1;                // original token/word
+  repeated string phonemes = 2;    // phonemes for the token
+}
+
+message TextToPhonemeResponse {
+  bool success = 1;
+  repeated PhonemeSequence sequences = 2; // per-token phoneme sequences
+  repeated string phonemes = 3;           // flattened phoneme sequence (joined)
+  repeated int32 phoneme_ids = 5;         // flattened ids for embeddings
+  string error_message = 4;
+}
+
+message TextToSpeechRequest {
+  string text = 1;
+  int32 sample_rate = 2; // desired output rate; if 0, use default
+  string voice_style = 3; // e.g., "en-ng" for Nigerian English, "en-us", "en-gb"
+}
+
+message TextToSpeechResponse {
+  bool success = 1;
+  repeated float samples = 2; // mono waveform [-1,1]
+  int32 sample_rate = 3;
+  string error_message = 4;
+}
+
+// Coherent sentence generation (aim for 20-25 words by default)
+message GenerateSentenceRequest {
+  int32 min_words = 1; // default 20
+  int32 max_words = 2; // default 25
+  string topic = 3;    // optional topic/seed
+}
+
+message GenerateSentenceResponse {
+  bool success = 1;
+  string sentence = 2;
+  int32 word_count = 3;
+  string error_message = 4;
+}
+
+// Random word juxtaposition (e.g., 7 words)
+message GenerateJuxtapositionRequest {
+  int32 num_words = 1; // default 7
+}
+
+message GenerateJuxtapositionResponse {
+  bool success = 1;
+  repeated string words = 2;
+  string error_message = 3;
+}
+
+// Request to get model information
+message GetModelInfoRequest {
+  // Empty request
+}
+
+// Response with model information
+message GetModelInfoResponse {
+  ModelInfo model_info = 1;
+  bool model_loaded = 2;
+}
+
+// Request to unload model
+message UnloadModelRequest {
+  // Empty request
+}
+
+// Response after unloading model
+message UnloadModelResponse {
+  bool success = 1;
+  string message = 2;
+}
+
+// Configuration for model loading
+message ModelConfig {
+  float confidence_threshold = 1;
+  int32 expected_sample_rate = 2;    // Expected sample rate (e.g., 16000)
+  bool normalize_audio = 3;          // Whether to normalize audio to [-1, 1]
+  map<string, string> additional_params = 4;
+}
+
+// Information about the loaded model
+message ModelInfo {
+  string model_name = 1;
+  string model_version = 2;
+  string model_path = 3;
+  int64 model_size_bytes = 4;
+  repeated string supported_features = 5;
+  ModelConfig config = 6;
+  int32 embedding_dimension = 7;     // Embedding dimension (e.g., 512)
+  string input_name = 8;             // Input tensor name (e.g., "wave")
+  string output_name = 9;            // Output tensor name (e.g., "embedding")
+}
