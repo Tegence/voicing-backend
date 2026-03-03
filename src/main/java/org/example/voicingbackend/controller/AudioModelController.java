@@ -1,5 +1,7 @@
 package org.example.voicingbackend.controller;
 
+import com.google.protobuf.ByteString;
+import io.grpc.Status;
 import io.grpc.stub.StreamObserver;
 import org.example.voicingbackend.service.AuthenticationService;
 import org.example.voicingbackend.service.AudioModelService;
@@ -43,9 +45,15 @@ import org.example.voicingbackend.audiomodel.VerifyUserRequest;
 import org.example.voicingbackend.audiomodel.VerifyUserResponse;
 import org.example.voicingbackend.audiomodel.EnrolUserVoiceRequest;
 import org.example.voicingbackend.audiomodel.EnrolUserVoiceResponse;
+import org.example.voicingbackend.util.PythonTtsClient;
+import org.example.voicingbackend.audiomodel.TextToSpeechvitsRequest;
+import org.example.voicingbackend.audiomodel.TextToSpeechvitsResponse;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import java.nio.file.Files;
+import java.nio.file.Path;
+import org.example.voicingbackend.util.AudioPlayer;
 /**
  * gRPC controller for handling audio model and authentication requests
  */
@@ -61,6 +69,7 @@ public class AudioModelController extends AudioModelServiceGrpc.AudioModelServic
     private final TTSService ttsService;
     private final org.example.voicingbackend.service.SentenceService sentenceService;
     private final org.example.voicingbackend.repository.impl.MongoEmbeddingRepository embeddingRepository;
+    private final PythonTtsClient pythonTtsClient;
     
     public AudioModelController() {
         this.authService = new AuthenticationService();
@@ -72,6 +81,7 @@ public class AudioModelController extends AudioModelServiceGrpc.AudioModelServic
         this.textToPhonemeService = new TextToPhonemeService();
         this.ttsService = new TTSService();
         this.sentenceService = new org.example.voicingbackend.service.SentenceService();
+        this.pythonTtsClient = new PythonTtsClient();
     }
     
     // Authentication endpoints
@@ -598,5 +608,40 @@ public class AudioModelController extends AudioModelServiceGrpc.AudioModelServic
         }
         responseObserver.onNext(resp.build());
         responseObserver.onCompleted();
+    }
+
+    @Override
+    public void textToSpeechVits(TextToSpeechvitsRequest request,
+                                 StreamObserver<TextToSpeechvitsResponse> responseObserver) {
+
+        TextToSpeechvitsResponse.Builder resp = TextToSpeechvitsResponse.newBuilder();
+
+        try {
+            TTSService.Result result = ttsService.synthesize(request.getText(), 22050);
+
+            if (!result.success) {
+                resp.setSuccess(false)
+                        .setErrorMessage(result.error);
+            } else {
+                AudioPlayer.saveWav(
+                        result.audio,
+                        result.sampleRate,
+                        "test.wav"
+                );
+                resp.setSuccess(true)
+                        .setSampleRate(result.sampleRate);
+
+                for (float s : result.audio)
+                    resp.addSamples(s);
+            }
+
+            responseObserver.onNext(resp.build());
+            responseObserver.onCompleted();
+
+        } catch (Exception e) {
+            responseObserver.onError(
+                    Status.INTERNAL.withDescription(e.getMessage()).asRuntimeException()
+            );
+        }
     }
 }

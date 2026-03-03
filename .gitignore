@@ -47,3 +47,4 @@ build/
 .env
 .env.*
 !.env.example
+test.wav

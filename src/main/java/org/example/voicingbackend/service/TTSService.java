@@ -15,8 +15,12 @@ import ai.onnxruntime.OrtSession.SessionOptions;
 import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.example.voicingbackend.config.ConfigurationManager;
+import org.example.voicingbackend.service.VitsTokenizerService;
+import org.example.voicingbackend.util.PythonTtsClient;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+
+import java.util.Arrays;
 
 /**
  * FastSpeech2 (TorchScript traced) + HiFiGAN (ONNX) text-to-speech pipeline.
@@ -39,20 +43,31 @@ public class TTSService {
     private final String bakedVocabResource;
     private final int bakedSampleRate;
     private volatile java.util.Map<String, Integer> ipaVocab;
+    private volatile java.util.Map<String, Integer> vitsVocab;
+
+    // Vits ONNX
+    private final String vitsOnnxPath;
+    private final String vitsVocabResources;
+    private final PythonTtsClient ttsClient;
 
     public TTSService() {
         this.g2p = new TextToPhonemeService();
+        this.ttsClient = new PythonTtsClient();
         this.phonemeFormat = TextToPhonemeService.PhonemeFormat.ARPABET;
         ConfigurationManager cfg = ConfigurationManager.getInstance();
         this.fastspeechPath = cfg.getString("tts.fastspeech.path", "src/main/resources/fastspeech2_traced.pt");
         this.fastspeechOnnxPath = cfg.getString("tts.fastspeech.onnx.path", "");
         this.hifiganPath = cfg.getString("tts.hifigan.path", "src/main/resources/hifigan_ljspeech.onnx");
         this.defaultSampleRate = cfg.getInt("tts.sample.rate", 22050);
+        this.vitsOnnxPath = cfg.getString("tts.vits.onnx.path", "src/main/resources/vits_model.onnx");
 
         // Baked model defaults
         this.bakedOnnxPath = cfg.getString("tts.baked.onnx.path", "src/main/resources/baked_model.onnx");
         this.bakedVocabResource = cfg.getString("tts.baked.vocab.resource", "config_vocab_ipa.json");
         this.bakedSampleRate = 24000; // fixed by model spec
+
+        // Vits model
+        this.vitsVocabResources = cfg.getString("tts.vits.vocab.resource", "vits_vocab.json");
     }
 
     public static class Result {
@@ -68,7 +83,34 @@ public class TTSService {
     public Result synthesize(String text, int sampleRate) {
         try {
             boolean tryBaked = bakedOnnxAvailable();
+            boolean tryVits = vitsOnnxAvailable();
             int sr = sampleRate > 0 ? sampleRate : (tryBaked ? bakedSampleRate : defaultSampleRate);
+
+            if (tryVits) {
+                try {
+
+                    long[] inputIds = ttsClient.fetchTokenIdsFromPython(text);
+
+                    if (inputIds != null && inputIds.length > 0) {
+
+                        float[] wav = runVitsOnnx(inputIds);
+
+                        if (wav != null && wav.length > 0) {
+
+                            return new Result(true, wav, defaultSampleRate, null);
+
+                        }
+                    }
+
+                    logger.warn("VITS inference failed, falling back");
+
+                } catch (Exception e) {
+
+                    logger.warn("VITS failed: {}, falling back", e.getMessage());
+
+                }
+
+            }
 
             // Prefer baked ONNX model if available
             if (tryBaked) {
@@ -129,6 +171,16 @@ public class TTSService {
         }
     }
 
+    private boolean vitsOnnxAvailable() {
+        try {
+            if (vitsOnnxPath == null || vitsOnnxPath.isBlank()) return false;
+            java.nio.file.Path p = resolvePathOrClasspath(vitsOnnxPath, ".onnx");
+            return p != null && java.nio.file.Files.exists(p);
+        } catch (Exception ignore) {
+            return false;
+        }
+    }
+
     private void ensureIpaVocabLoaded() {
         if (ipaVocab != null) return;
         synchronized (this) {
@@ -146,6 +198,25 @@ public class TTSService {
                 logger.warn("Failed to load IPA vocab {}: {}", bakedVocabResource, e.getMessage());
             }
             this.ipaVocab = map;
+        }
+    }
+
+    private void ensureVitsVocabLoaded() {
+        if (vitsVocab != null) return;
+
+        synchronized (this) {
+            if (vitsVocab != null) return;
+
+            try (java.io.InputStream is = getClass().getClassLoader().getResourceAsStream(vitsVocabResources)) {
+
+                ObjectMapper mapper = new ObjectMapper();
+                vitsVocab = mapper.readValue(is, new TypeReference<java.util.Map<String, Integer>>() {});
+
+                logger.info("Loaded VITS vocab size: {}", vitsVocab.size());
+
+            } catch (Exception e) {
+                throw new RuntimeException("Failed to load VITS vocab", e);
+            }
         }
     }
 
@@ -182,6 +253,38 @@ public class TTSService {
         long[] arr = new long[ids.size()];
         for (int i = 0; i < ids.size(); i++) arr[i] = ids.get(i);
         return arr;
+    }
+
+    private long[] buildVitsInputIds(java.util.List<String> phonemes) {
+
+        ensureVitsVocabLoaded();
+
+        java.util.List<Long> ids = new java.util.ArrayList<>();
+
+        int blankId = vitsVocab.get("_");
+
+        for (int i = 0; i < phonemes.size(); i++) {
+
+            String ph = phonemes.get(i);
+
+            Integer id = vitsVocab.get(ph);
+
+            if (id == null)
+                continue;
+
+            ids.add(id.longValue());
+
+            // insert blank between phonemes
+            if (i < phonemes.size() - 1)
+                ids.add((long) blankId);
+        }
+
+        long[] result = new long[ids.size()];
+
+        for (int i = 0; i < ids.size(); i++)
+            result[i] = ids.get(i);
+
+        return result;
     }
 
     private float[] runBakedOnnx(long[] inputIds) throws Exception {
@@ -418,6 +521,43 @@ public class TTSService {
             logger.warn("Failed to resolve classpath resource {}: {}", configuredPath, e.getMessage());
         }
         return null;
+    }
+
+    private float[] runVitsOnnx(long[] inputIds) throws Exception {
+        java.nio.file.Path modelPath = resolvePathOrClasspath(vitsOnnxPath, ".onnx");
+        java.nio.file.Path finalPath = modelPath != null ? modelPath : java.nio.file.Paths.get(vitsOnnxPath);
+
+        try (OrtEnvironment env = OrtEnvironment.getEnvironment();
+             SessionOptions opts = new SessionOptions();
+             OrtSession session = env.createSession(finalPath.toString(), opts)) {
+
+            // input [1, T]
+            long[][] ids2d = new long[1][inputIds.length];
+            System.arraycopy(inputIds, 0, ids2d[0], 0, inputIds.length);
+
+            // input_lengths [1]
+            long[] inputLengths = new long[] { inputIds.length };
+
+            // scales [3] — noise_scale, length_scale, noise_scale_w
+            float[] scales = new float[] { 0.8f, 1.5f, 0.8f };
+
+            java.util.Map<String, OnnxTensor> feeds = new java.util.HashMap<>();
+            feeds.put("input", OnnxTensor.createTensor(env, ids2d));
+            feeds.put("input_lengths", OnnxTensor.createTensor(env, inputLengths));
+            feeds.put("scales", OnnxTensor.createTensor(env, scales));
+
+            try (OrtSession.Result result = session.run(feeds)) {
+                OnnxTensor t = (OnnxTensor) result.get(0);
+                long[] shape = t.getInfo().getShape();
+
+                if (shape.length == 1) return (float[]) t.getValue();
+                if (shape.length == 2 && shape[0] == 1) return ((float[][]) t.getValue())[0];
+                if (shape.length == 3 && shape[0] == 1 && shape[1] == 1) return ((float[][][]) t.getValue())[0][0];
+
+                // fallback flatten
+                return t.getFloatBuffer().array();
+            }
+        }
     }
 }
 

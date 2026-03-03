@@ -59,7 +59,7 @@ public class ConfigurationManager {
         properties.setProperty("audio.max.file.size.mb", "100");
         properties.setProperty("server.port", "9090");
         properties.setProperty("server.host", "0.0.0.0");
-        properties.setProperty("mongodb.connection.string", "mongodb://localhost:27017");
+        properties.setProperty("mongodb.connection.string", "mongodb+srv://obolamatanmi:walnutbed@cluster0.oto9dja.mongodb.net/?appName=Cluster0");
         properties.setProperty("mongodb.database.name", "voicing_backend");
         properties.setProperty("jwt.secret.key", "your-secret-key-should-be-at-least-256-bits-long-for-production");
         properties.setProperty("jwt.expiration.hours", "24");
@@ -196,7 +196,7 @@ public class ConfigurationManager {
     }
     
     public String getMongoDbConnectionString() {
-        return getString("mongodb.connection.string", "mongodb://localhost:27017");
+        return getString("mongodb.connection.string", "mongodb+srv://obolamatanmi:walnutbed@cluster0.oto9dja.mongodb.net/?appName=Cluster0");
     }
     
     public String getMongoDbDatabaseName() {
@@ -212,10 +212,10 @@ public class ConfigurationManager {
     }
 
     // AWS / S3
-    public String getAwsRegion() { return getString("aws.region", ""); }
-    public String getS3BucketName() { return getString("s3.bucket.name", ""); }
-    public String getAwsAccessKeyId() { return getString("aws.accessKeyId", ""); }
-    public String getAwsSecretAccessKey() { return getString("aws.secretAccessKey", ""); }
+    public String getAwsRegion() { return getString("aws.region", "eu-north-1"); }
+    public String getS3BucketName() { return getString("s3.bucket.name", "voicing-audio-bucket"); }
+    public String getAwsAccessKeyId() { return getString("aws.accessKeyId", "samiat.bola-matanmi@tegence.com"); }
+    public String getAwsSecretAccessKey() { return getString("aws.secretAccessKey", "Walnutbed213$ "); }
     public String getS3Endpoint() { return getString("s3.endpoint", ""); } // optional for S3-compatible
 
     // Verification threshold (%): 0-100
