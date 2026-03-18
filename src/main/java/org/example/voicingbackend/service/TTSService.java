@@ -20,6 +20,8 @@ import org.example.voicingbackend.util.PythonTtsClient;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import java.nio.file.Files;
+import java.nio.file.Paths;
 import java.util.Arrays;
 
 /**
@@ -58,8 +60,9 @@ public class TTSService {
         this.fastspeechPath = cfg.getString("tts.fastspeech.path", "src/main/resources/fastspeech2_traced.pt");
         this.fastspeechOnnxPath = cfg.getString("tts.fastspeech.onnx.path", "");
         this.hifiganPath = cfg.getString("tts.hifigan.path", "src/main/resources/hifigan_ljspeech.onnx");
-        this.defaultSampleRate = cfg.getInt("tts.sample.rate", 22050);
         this.vitsOnnxPath = cfg.getString("tts.vits.onnx.path", "src/main/resources/vits_model.onnx");
+        this.defaultSampleRate = cfg.getInt("tts.sample.rate", 22050);
+
 
         // Baked model defaults
         this.bakedOnnxPath = cfg.getString("tts.baked.onnx.path", "src/main/resources/baked_model.onnx");
@@ -75,8 +78,12 @@ public class TTSService {
         public final float[] audio;
         public final int sampleRate;
         public final String error;
+
         public Result(boolean success, float[] audio, int sampleRate, String error) {
-            this.success = success; this.audio = audio; this.sampleRate = sampleRate; this.error = error;
+            this.success = success;
+            this.audio = audio;
+            this.sampleRate = sampleRate;
+            this.error = error;
         }
     }
 
@@ -88,7 +95,6 @@ public class TTSService {
 
             if (tryVits) {
                 try {
-
                     long[] inputIds = ttsClient.fetchTokenIdsFromPython(text);
 
                     if (inputIds != null && inputIds.length > 0) {
@@ -96,6 +102,8 @@ public class TTSService {
                         float[] wav = runVitsOnnx(inputIds);
 
                         if (wav != null && wav.length > 0) {
+//                            byte[] wavBytes = toWavBytes(wav, defaultSampleRate);
+//                            Files.write(Paths.get("tts.wav"), wavBytes);
 
                             return new Result(true, wav, defaultSampleRate, null);
 
@@ -132,7 +140,7 @@ public class TTSService {
                 }
             }
 
-            // Fallback to FastSpeech2 (+ HiFiGAN)
+//             Fallback to FastSpeech2 (+ HiFiGAN)
             var g2pres = g2p.convert(text, null, phonemeFormat);
             if (!g2pres.success || g2pres.flattenedIds == null || g2pres.flattenedIds.isEmpty()) {
                 return new Result(false, null, sr, g2pres.error != null ? g2pres.error : "G2P failed");
@@ -191,7 +199,8 @@ public class TTSService {
                     logger.warn("IPA vocab resource not found: {}", bakedVocabResource);
                 } else {
                     ObjectMapper om = new ObjectMapper();
-                    map = om.readValue(is, new TypeReference<java.util.Map<String, Integer>>(){});
+                    map = om.readValue(is, new TypeReference<java.util.Map<String, Integer>>() {
+                    });
                     logger.info("Loaded IPA vocab ({} entries) from {}", map.size(), bakedVocabResource);
                 }
             } catch (Exception e) {
@@ -210,7 +219,8 @@ public class TTSService {
             try (java.io.InputStream is = getClass().getClassLoader().getResourceAsStream(vitsVocabResources)) {
 
                 ObjectMapper mapper = new ObjectMapper();
-                vitsVocab = mapper.readValue(is, new TypeReference<java.util.Map<String, Integer>>() {});
+                vitsVocab = mapper.readValue(is, new TypeReference<java.util.Map<String, Integer>>() {
+                });
 
                 logger.info("Loaded VITS vocab size: {}", vitsVocab.size());
 
@@ -306,12 +316,12 @@ public class TTSService {
 
             // voice_id [1] (default 0 if present)
             if (inputNames.contains("voice_id")) {
-                long[] voice = new long[] { 0L };
+                long[] voice = new long[]{0L};
                 feeds.put("voice_id", OnnxTensor.createTensor(env, voice));
             }
             // speed [1] (optional default 1.0)
             if (inputNames.contains("speed")) {
-                float[] sp = new float[] { 1.0f };
+                float[] sp = new float[]{1.0f};
                 feeds.put("speed", OnnxTensor.createTensor(env, sp));
             }
 
@@ -346,9 +356,20 @@ public class TTSService {
             java.nio.file.Path modelPath = resolvePathOrClasspath(fastspeechPath, ".pt");
             model.load(modelPath != null ? modelPath : java.nio.file.Paths.get(fastspeechPath));
             Translator<NDList, NDList> translator = new Translator<NDList, NDList>() {
-                @Override public NDList processInput(TranslatorContext ctx, NDList input) { return input; }
-                @Override public NDList processOutput(TranslatorContext ctx, NDList list) { return list; }
-                @Override public ai.djl.translate.Batchifier getBatchifier() { return null; }
+                @Override
+                public NDList processInput(TranslatorContext ctx, NDList input) {
+                    return input;
+                }
+
+                @Override
+                public NDList processOutput(TranslatorContext ctx, NDList list) {
+                    return list;
+                }
+
+                @Override
+                public ai.djl.translate.Batchifier getBatchifier() {
+                    return null;
+                }
             };
             try (ai.djl.inference.Predictor<NDList, NDList> predictor = model.newPredictor(translator)) {
                 NDArray tok = manager.create(padded).reshape(1, FIXED_SEQUENCE_LENGTH).toType(DataType.INT64, false);
@@ -356,7 +377,7 @@ public class TTSService {
                 NDArray mel = outList.get(0);
                 if (mel.getShape().dimension() < 3) {
                     logger.warn("FastSpeech2 output shape unexpected: {}", mel.getShape());
-                    return new float[][][] { new float[80][100] };
+                    return new float[][][]{new float[80][100]};
                 }
                 long b = mel.getShape().get(0);
                 long c = mel.getShape().get(1);
@@ -371,7 +392,7 @@ public class TTSService {
             }
         } catch (Exception e) {
             logger.warn("FastSpeech2 failed: {}", e.getMessage());
-            return new float[][][] { new float[80][100] };
+            return new float[][][]{new float[80][100]};
         }
     }
 
@@ -389,9 +410,20 @@ public class TTSService {
             }
             model.load(modelPath);
             Translator<NDList, NDList> translator = new Translator<NDList, NDList>() {
-                @Override public NDList processInput(TranslatorContext ctx, NDList input) { return input; }
-                @Override public NDList processOutput(TranslatorContext ctx, NDList list) { return list; }
-                @Override public ai.djl.translate.Batchifier getBatchifier() { return null; }
+                @Override
+                public NDList processInput(TranslatorContext ctx, NDList input) {
+                    return input;
+                }
+
+                @Override
+                public NDList processOutput(TranslatorContext ctx, NDList list) {
+                    return list;
+                }
+
+                @Override
+                public ai.djl.translate.Batchifier getBatchifier() {
+                    return null;
+                }
             };
             try (ai.djl.inference.Predictor<NDList, NDList> predictor = model.newPredictor(translator)) {
                 NDArray tokFlat = manager.create(tokens).toType(DataType.INT64, false); // [T]
@@ -427,7 +459,7 @@ public class TTSService {
                         return out;
                     } else {
                         logger.warn("Unexpected 2D FS2 ONNX shape: {}", mel.getShape());
-                        return new float[][][] { new float[80][100] };
+                        return new float[][][]{new float[80][100]};
                     }
                 } else if (dims == 3) {
                     long d0 = mel.getShape().get(0);
@@ -449,11 +481,11 @@ public class TTSService {
                         return out;
                     } else {
                         logger.warn("Unexpected 3D FS2 ONNX shape: {}", mel.getShape());
-                        return new float[][][] { new float[80][100] };
+                        return new float[][][]{new float[80][100]};
                     }
                 } else {
                     logger.warn("Unexpected FS2 ONNX output dims: {}", dims);
-                    return new float[][][] { new float[80][100] };
+                    return new float[][][]{new float[80][100]};
                 }
             }
         } catch (Exception e) {
@@ -505,11 +537,45 @@ public class TTSService {
         }
     }
 
+    private java.nio.file.Path resolveModelPath(String path, String expectedExt) {
+        System.out.println("model path: " + path + " expectedExt: " + expectedExt);
+        try {
+            if (path == null || path.isBlank()) return null;
+
+            // 🔥 If it's a GCS path → download
+            if (path.startsWith("gs://")) {
+                return GoogleCloudStorageService.ensureModel(path);
+            }
+
+            // local file
+            java.nio.file.Path p = java.nio.file.Paths.get(path);
+            if (java.nio.file.Files.exists(p)) {
+                return p;
+            }
+
+            // fallback to classpath
+            try (java.io.InputStream is = getClass().getClassLoader().getResourceAsStream(path)) {
+                if (is != null) {
+                    java.nio.file.Path tmp = java.nio.file.Files.createTempFile("tts-model", expectedExt);
+                    java.nio.file.Files.copy(is, tmp, java.nio.file.StandardCopyOption.REPLACE_EXISTING);
+                    tmp.toFile().deleteOnExit();
+                    return tmp;
+                }
+            }
+
+        } catch (Exception e) {
+            logger.warn("Failed to resolve model {}: {}", path, e.getMessage());
+        }
+
+        return null;
+    }
+
     private java.nio.file.Path resolvePathOrClasspath(String configuredPath, String expectedExt) {
         try {
             java.nio.file.Path p = java.nio.file.Paths.get(configuredPath);
             if (java.nio.file.Files.exists(p)) return p;
-        } catch (Exception ignore) { }
+        } catch (Exception ignore) {
+        }
         try (java.io.InputStream is = getClass().getClassLoader().getResourceAsStream(configuredPath)) {
             if (is != null) {
                 java.nio.file.Path tmp = java.nio.file.Files.createTempFile("tts-model", expectedExt);
@@ -536,10 +602,10 @@ public class TTSService {
             System.arraycopy(inputIds, 0, ids2d[0], 0, inputIds.length);
 
             // input_lengths [1]
-            long[] inputLengths = new long[] { inputIds.length };
+            long[] inputLengths = new long[]{inputIds.length};
 
             // scales [3] — noise_scale, length_scale, noise_scale_w
-            float[] scales = new float[] { 0.8f, 1.5f, 0.8f };
+            float[] scales = new float[]{0.8f, 1.5f, 0.8f};
 
             java.util.Map<String, OnnxTensor> feeds = new java.util.HashMap<>();
             feeds.put("input", OnnxTensor.createTensor(env, ids2d));
@@ -559,6 +625,40 @@ public class TTSService {
             }
         }
     }
-}
 
+    private byte[] toWavBytes(float[] samples, int sampleRate) throws Exception {
+
+        byte[] pcm = new byte[samples.length * 2];
+
+        int idx = 0;
+
+        for (float f : samples) {
+
+            short s = (short) Math.max(Math.min(f * 32767, 32767), -32768);
+
+            pcm[idx++] = (byte) (s & 0xff);
+            pcm[idx++] = (byte) ((s >> 8) & 0xff);
+        }
+
+        java.io.ByteArrayOutputStream baos = new java.io.ByteArrayOutputStream();
+
+        javax.sound.sampled.AudioFormat format =
+                new javax.sound.sampled.AudioFormat(sampleRate, 16, 1, true, false);
+
+        javax.sound.sampled.AudioInputStream ais =
+                new javax.sound.sampled.AudioInputStream(
+                        new java.io.ByteArrayInputStream(pcm),
+                        format,
+                        samples.length);
+
+        javax.sound.sampled.AudioSystem.write(
+                ais,
+                javax.sound.sampled.AudioFileFormat.Type.WAVE,
+                baos
+        );
+
+        return baos.toByteArray();
+    }
+
+}
 

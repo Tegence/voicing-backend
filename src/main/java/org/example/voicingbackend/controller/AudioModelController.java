@@ -615,6 +615,7 @@ public class AudioModelController extends AudioModelServiceGrpc.AudioModelServic
                                  StreamObserver<TextToSpeechvitsResponse> responseObserver) {
 
         TextToSpeechvitsResponse.Builder resp = TextToSpeechvitsResponse.newBuilder();
+        System.out.println("Running VITS inference on " + request.getText());
 
         try {
             TTSService.Result result = ttsService.synthesize(request.getText(), 22050);
@@ -623,11 +624,11 @@ public class AudioModelController extends AudioModelServiceGrpc.AudioModelServic
                 resp.setSuccess(false)
                         .setErrorMessage(result.error);
             } else {
-                AudioPlayer.saveWav(
-                        result.audio,
-                        result.sampleRate,
-                        "test.wav"
-                );
+//                AudioPlayer.saveWav(
+//                        result.audio,
+//                        result.sampleRate,
+//                        "test.wav"
+//                );
                 resp.setSuccess(true)
                         .setSampleRate(result.sampleRate);
 

@@ -7,6 +7,7 @@ import org.example.voicingbackend.config.ConfigurationManager;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import java.nio.file.Path;
 import java.util.HashMap;
 import java.util.Map;
 
@@ -23,10 +24,12 @@ import java.util.Collections;
 /**
  * Service for Google Cloud Storage operations
  */
+
 public class GoogleCloudStorageService {
     private static final Logger logger = LoggerFactory.getLogger(GoogleCloudStorageService.class);
     
     private final Storage storage;
+    private static final String LOCAL_MODEL_DIR = "/src/main/resources";
     
     public GoogleCloudStorageService() {
         ConfigurationManager config = ConfigurationManager.getInstance();
@@ -329,5 +332,38 @@ public class GoogleCloudStorageService {
         public String getFileName() { return fileName; }
         public long getFileSizeBytes() { return fileSizeBytes; }
         public String getErrorMessage() { return errorMessage; }
+    }
+
+    public static Path ensureModel(String gcsUri) throws Exception {
+
+        String withoutPrefix = gcsUri.replace("gs://", "");
+
+        String bucket = withoutPrefix.substring(0, withoutPrefix.indexOf("/"));
+        String object = withoutPrefix.substring(withoutPrefix.indexOf("/") + 1);
+
+        Path localPath = Paths.get(LOCAL_MODEL_DIR, object);
+
+        // 1️⃣ Check if model already exists
+        if (Files.exists(localPath)) {
+            System.out.println("Using cached model: " + localPath);
+            return localPath;
+        }
+
+        // 2️⃣ Download from GCS
+        Files.createDirectories(localPath.getParent());
+
+        Storage storage = StorageOptions.getDefaultInstance().getService();
+
+        Blob blob = storage.get(bucket, object);
+
+        if (blob == null) {
+            throw new RuntimeException("Model not found in GCS: " + gcsUri);
+        }
+
+        blob.downloadTo(localPath);
+
+        System.out.println("Downloaded model from GCS → " + localPath);
+
+        return localPath;
     }
 }
