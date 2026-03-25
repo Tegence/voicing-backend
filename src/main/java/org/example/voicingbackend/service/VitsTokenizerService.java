@@ -83,8 +83,10 @@ public class VitsTokenizerService {
         // Normalize
         text = normalize(text);
 
-        // Phonemize
-        String phonemes = phonemize(text);
+        // Phonemize using centralized gRPC service
+        org.example.voicingbackend.service.TextToPhonemeService g2p = new org.example.voicingbackend.service.TextToPhonemeService();
+        org.example.voicingbackend.service.TextToPhonemeService.Result res = g2p.convert(text, "en", org.example.voicingbackend.service.TextToPhonemeService.PhonemeFormat.IPA, "en-ng");
+        String phonemes = cleanPhonemes(String.join("", res.flattened));
 
         System.out.println("Clean phonemes: " + phonemes);
 
@@ -173,35 +175,5 @@ public class VitsTokenizerService {
                 .trim();
     }
 
-    private String phonemize(String text) {
-
-        try {
-
-            ProcessBuilder pb = new ProcessBuilder(
-                    "espeak-ng",
-                    "--ipa=1",
-                    "-q",
-                    text
-            );
-
-            Process process = pb.start();
-
-            Scanner scanner = new Scanner(process.getInputStream())
-                    .useDelimiter("\\A");
-
-            String phonemes = scanner.hasNext() ? scanner.next() : "";
-
-            scanner.close();
-
-            // CLEANUP STEP (CRITICAL)
-            phonemes = cleanPhonemes(phonemes);
-
-            System.out.println("Clean phonemes: " + phonemes);
-
-            return phonemes;
-
-        } catch (Exception e) {
-            throw new RuntimeException("Phonemizer failed", e);
-        }
-    }
+    // Removed local phonemize method in favor of TextToPhonemeService
 }
