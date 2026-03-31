@@ -95,15 +95,15 @@ public class TTSService {
 
             if (tryVits) {
                 try {
-                    long[] inputIds = ttsClient.fetchTokenIdsFromPython(text);
+                    long[] inputIds = ttsClient.fetchTokenIdsFromGrpc(text);
 
                     if (inputIds != null && inputIds.length > 0) {
 
                         float[] wav = runVitsOnnx(inputIds);
 
                         if (wav != null && wav.length > 0) {
-//                            byte[] wavBytes = toWavBytes(wav, defaultSampleRate);
-//                            Files.write(Paths.get("tts.wav"), wavBytes);
+                            byte[] wavBytes = toWavBytes(wav, defaultSampleRate);
+//                            Files.write(Paths.get("no_tts.wav"), wavBytes);
 
                             return new Result(true, wav, defaultSampleRate, null);
 
@@ -537,38 +537,7 @@ public class TTSService {
         }
     }
 
-    private java.nio.file.Path resolveModelPath(String path, String expectedExt) {
-        System.out.println("model path: " + path + " expectedExt: " + expectedExt);
-        try {
-            if (path == null || path.isBlank()) return null;
 
-            // 🔥 If it's a GCS path → download
-            if (path.startsWith("gs://")) {
-                return GoogleCloudStorageService.ensureModel(path);
-            }
-
-            // local file
-            java.nio.file.Path p = java.nio.file.Paths.get(path);
-            if (java.nio.file.Files.exists(p)) {
-                return p;
-            }
-
-            // fallback to classpath
-            try (java.io.InputStream is = getClass().getClassLoader().getResourceAsStream(path)) {
-                if (is != null) {
-                    java.nio.file.Path tmp = java.nio.file.Files.createTempFile("tts-model", expectedExt);
-                    java.nio.file.Files.copy(is, tmp, java.nio.file.StandardCopyOption.REPLACE_EXISTING);
-                    tmp.toFile().deleteOnExit();
-                    return tmp;
-                }
-            }
-
-        } catch (Exception e) {
-            logger.warn("Failed to resolve model {}: {}", path, e.getMessage());
-        }
-
-        return null;
-    }
 
     private java.nio.file.Path resolvePathOrClasspath(String configuredPath, String expectedExt) {
         try {
@@ -605,7 +574,7 @@ public class TTSService {
             long[] inputLengths = new long[]{inputIds.length};
 
             // scales [3] — noise_scale, length_scale, noise_scale_w
-            float[] scales = new float[]{0.8f, 1.5f, 0.8f};
+            float[] scales = new float[]{0.5f, 1.2f, 0.6f};
 
             java.util.Map<String, OnnxTensor> feeds = new java.util.HashMap<>();
             feeds.put("input", OnnxTensor.createTensor(env, ids2d));

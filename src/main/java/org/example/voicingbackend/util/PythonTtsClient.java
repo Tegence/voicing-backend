@@ -2,6 +2,11 @@ package org.example.voicingbackend.util;
 
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import io.grpc.ManagedChannel;
+import io.grpc.ManagedChannelBuilder;
+import org.example.voicingbackend.phonemes.PhonemeServiceGrpc;
+import org.example.voicingbackend.phonemes.TextRequest;
+import org.example.voicingbackend.phonemes.TokenResponse;
 
 import java.net.URI;
 import java.net.URLEncoder;
@@ -13,7 +18,7 @@ import java.util.Map;
 
 public class PythonTtsClient {
 
-    public long[] fetchTokenIdsFromPython(String text) throws Exception {
+    public long[] fetchTokenIdsFromhttp(String text) throws Exception {
 
         HttpClient client = HttpClient.newBuilder()
                 .version(HttpClient.Version.HTTP_1_1)  // <-- add this
@@ -55,6 +60,39 @@ public class PythonTtsClient {
             ids[i] = idsNode.get(i).asLong();
         }
 
+        return ids;
+    }
+
+    public long[] fetchTokenIdsFromGrpc(String text) {
+
+        // 1. Create channel (connect to your Docker gRPC server)
+        ManagedChannel channel = ManagedChannelBuilder
+                .forAddress("localhost", 50051)
+                .usePlaintext()
+                .build();
+
+        // 2. Create stub (client)
+        PhonemeServiceGrpc.PhonemeServiceBlockingStub stub =
+                PhonemeServiceGrpc.newBlockingStub(channel);
+
+        // 3. Build request
+        TextRequest request = TextRequest.newBuilder()
+                .setText(text)
+                .build();
+
+        // 4. Call gRPC method
+        TokenResponse response = stub.tokenize(request);
+
+        // 5. Convert to long[]
+        long[] ids = new long[response.getIdsCount()];
+
+        for (int i = 0; i < response.getIdsCount(); i++) {
+            ids[i] = response.getIds(i);
+        }
+
+        // 6. Shutdown channel
+        channel.shutdown();
+        System.out.println(ids);
         return ids;
     }
 }
