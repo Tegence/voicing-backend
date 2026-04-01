@@ -51,9 +51,6 @@ import org.example.voicingbackend.audiomodel.TextToSpeechvitsResponse;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
-import java.nio.file.Files;
-import java.nio.file.Path;
-import org.example.voicingbackend.util.AudioPlayer;
 /**
  * gRPC controller for handling audio model and authentication requests
  */
@@ -615,7 +612,7 @@ public class AudioModelController extends AudioModelServiceGrpc.AudioModelServic
                                  StreamObserver<TextToSpeechvitsResponse> responseObserver) {
 
         TextToSpeechvitsResponse.Builder resp = TextToSpeechvitsResponse.newBuilder();
-        System.out.println("Running VITS inference on " + request.getText());
+        logger.info("Running VITS inference on: {}", request.getText());
 
         try {
             TTSService.Result result = ttsService.synthesize(request.getText(), 22050);
@@ -624,11 +621,6 @@ public class AudioModelController extends AudioModelServiceGrpc.AudioModelServic
                 resp.setSuccess(false)
                         .setErrorMessage(result.error);
             } else {
-//                AudioPlayer.saveWav(
-//                        result.audio,
-//                        result.sampleRate,
-//                        "test.wav"
-//                );
                 resp.setSuccess(true)
                         .setSampleRate(result.sampleRate);
 

@@ -345,7 +345,7 @@ public class GoogleCloudStorageService {
 
         // 1️⃣ Check if model already exists
         if (Files.exists(localPath)) {
-            System.out.println("Using cached model: " + localPath);
+            logger.info("Using cached model: {}", localPath);
             return localPath;
         }
 
@@ -362,7 +362,7 @@ public class GoogleCloudStorageService {
 
         blob.downloadTo(localPath);
 
-        System.out.println("Downloaded model from GCS → " + localPath);
+        logger.info("Downloaded model from GCS → {}", localPath);
 
         return localPath;
     }

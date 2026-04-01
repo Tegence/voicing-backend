@@ -4,53 +4,54 @@ import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import io.grpc.ManagedChannel;
 import io.grpc.ManagedChannelBuilder;
+import org.example.voicingbackend.config.ConfigurationManager;
 import org.example.voicingbackend.phonemes.PhonemeServiceGrpc;
 import org.example.voicingbackend.phonemes.TextRequest;
 import org.example.voicingbackend.phonemes.TokenResponse;
-import org.example.voicingbackend.config.ConfigurationManager;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 import java.net.URI;
-import java.net.URLEncoder;
 import java.net.http.HttpClient;
 import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
 import java.nio.charset.StandardCharsets;
 import java.util.Map;
+import java.util.concurrent.TimeUnit;
 
 public class PythonTtsClient {
+    private static final Logger logger = LoggerFactory.getLogger(PythonTtsClient.class);
+    private static final ObjectMapper mapper = new ObjectMapper();
 
-    private final String host;
-    private final String port;
-    private final boolean tls;
+    private final HttpClient httpClient;
+    private final String httpEndpoint;
+    private final String grpcHost;
+    private final String grpcPort;
+    private final boolean grpcUseTls;
 
     public PythonTtsClient() {
+        this.httpClient = HttpClient.newBuilder()
+                .version(HttpClient.Version.HTTP_1_1)
+                .build();
         ConfigurationManager cfg = ConfigurationManager.getInstance();
-        this.host = cfg.getString("phoneme.remote.host", "localhost");
-        this.port = cfg.getString("phoneme.remote.port", "443");
-        this.tls = cfg.getBoolean("phoneme.remote.tls", true);
-
+        this.httpEndpoint = cfg.getString("tts.tokenizer.http.endpoint", "http://localhost:8000/tokenize");
+        this.grpcHost = cfg.getString("phoneme.remote.host", "localhost");
+        this.grpcPort = cfg.getString("phoneme.remote.port", "443");
+        this.grpcUseTls = cfg.getBoolean("phoneme.remote.tls", true);
     }
 
     public long[] fetchTokenIdsFromhttp(String text) throws Exception {
-
-        HttpClient client = HttpClient.newBuilder()
-                .version(HttpClient.Version.HTTP_1_1)  // <-- add this
-                .build();
-
-        String json = new ObjectMapper().writeValueAsString(
-                Map.of("text", text)
-        );
-
-        System.out.println("text to endpoint: " + json);
+        String json = mapper.writeValueAsString(Map.of("text", text));
+        logger.debug("Tokenizer HTTP request: {}", json);
 
         HttpRequest request = HttpRequest.newBuilder()
-                .uri(URI.create("http://localhost:8000/tokenize"))
+                .uri(URI.create(httpEndpoint))
                 .header("Content-Type", "application/json")
                 .POST(HttpRequest.BodyPublishers.ofString(json, StandardCharsets.UTF_8))
                 .build();
 
         HttpResponse<String> response =
-                client.send(request, HttpResponse.BodyHandlers.ofString());
+                httpClient.send(request, HttpResponse.BodyHandlers.ofString());
 
         if (response.statusCode() != 200) {
             throw new RuntimeException(
@@ -58,9 +59,7 @@ public class PythonTtsClient {
             );
         }
 
-        ObjectMapper mapper = new ObjectMapper();
         JsonNode node = mapper.readTree(response.body());
-
         JsonNode idsNode = node.get("ids");
 
         if (idsNode == null || !idsNode.isArray()) {
@@ -68,46 +67,47 @@ public class PythonTtsClient {
         }
 
         long[] ids = new long[idsNode.size()];
-
         for (int i = 0; i < idsNode.size(); i++) {
             ids[i] = idsNode.get(i).asLong();
         }
-
         return ids;
     }
 
     public long[] fetchTokenIdsFromGrpc(String text) {
-
         ManagedChannelBuilder<?> builder =
-                ManagedChannelBuilder.forTarget(host + ":" + port);
-
-        if (!tls) {
+                ManagedChannelBuilder.forTarget(grpcHost + ":" + grpcPort);
+        if (!grpcUseTls) {
             builder.usePlaintext();
         }
         ManagedChannel channel = builder.build();
 
-        // 2. Create stub (client)
-        PhonemeServiceGrpc.PhonemeServiceBlockingStub stub =
-                PhonemeServiceGrpc.newBlockingStub(channel);
+        try {
+            PhonemeServiceGrpc.PhonemeServiceBlockingStub stub =
+                    PhonemeServiceGrpc.newBlockingStub(channel);
 
-        // 3. Build request
-        TextRequest request = TextRequest.newBuilder()
-                .setText(text)
-                .build();
+            TextRequest request = TextRequest.newBuilder()
+                    .setText(text)
+                    .build();
 
-        // 4. Call gRPC method
-        TokenResponse response = stub.tokenize(request);
+            TokenResponse response = stub.tokenize(request);
 
-        // 5. Convert to long[]
-        long[] ids = new long[response.getIdsCount()];
+            long[] ids = new long[response.getIdsCount()];
+            for (int i = 0; i < response.getIdsCount(); i++) {
+                ids[i] = response.getIds(i);
+            }
 
-        for (int i = 0; i < response.getIdsCount(); i++) {
-            ids[i] = response.getIds(i);
+            logger.debug("gRPC tokenize returned {} ids", ids.length);
+            return ids;
+        } finally {
+            channel.shutdown();
+            try {
+                if (!channel.awaitTermination(5, TimeUnit.SECONDS)) {
+                    channel.shutdownNow();
+                }
+            } catch (InterruptedException e) {
+                channel.shutdownNow();
+                Thread.currentThread().interrupt();
+            }
         }
-
-        // 6. Shutdown channel
-        channel.shutdown();
-        return ids;
     }
 }
-

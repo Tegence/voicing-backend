@@ -15,14 +15,9 @@ import ai.onnxruntime.OrtSession.SessionOptions;
 import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.example.voicingbackend.config.ConfigurationManager;
-import org.example.voicingbackend.service.VitsTokenizerService;
 import org.example.voicingbackend.util.PythonTtsClient;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
-
-import java.nio.file.Files;
-import java.nio.file.Paths;
-import java.util.Arrays;
 
 /**
  * FastSpeech2 (TorchScript traced) + HiFiGAN (ONNX) text-to-speech pipeline.
@@ -102,11 +97,7 @@ public class TTSService {
                         float[] wav = runVitsOnnx(inputIds);
 
                         if (wav != null && wav.length > 0) {
-                            byte[] wavBytes = toWavBytes(wav, defaultSampleRate);
-//                            Files.write(Paths.get("no_tts.wav"), wavBytes);
-
                             return new Result(true, wav, defaultSampleRate, null);
-
                         }
                     }
 
@@ -140,7 +131,7 @@ public class TTSService {
                 }
             }
 
-//             Fallback to FastSpeech2 (+ HiFiGAN)
+            // Fallback to FastSpeech2 (+ HiFiGAN)
             var g2pres = g2p.convert(text, null, phonemeFormat);
             if (!g2pres.success || g2pres.flattenedIds == null || g2pres.flattenedIds.isEmpty()) {
                 return new Result(false, null, sr, g2pres.error != null ? g2pres.error : "G2P failed");
@@ -596,37 +587,7 @@ public class TTSService {
     }
 
     private byte[] toWavBytes(float[] samples, int sampleRate) throws Exception {
-
-        byte[] pcm = new byte[samples.length * 2];
-
-        int idx = 0;
-
-        for (float f : samples) {
-
-            short s = (short) Math.max(Math.min(f * 32767, 32767), -32768);
-
-            pcm[idx++] = (byte) (s & 0xff);
-            pcm[idx++] = (byte) ((s >> 8) & 0xff);
-        }
-
-        java.io.ByteArrayOutputStream baos = new java.io.ByteArrayOutputStream();
-
-        javax.sound.sampled.AudioFormat format =
-                new javax.sound.sampled.AudioFormat(sampleRate, 16, 1, true, false);
-
-        javax.sound.sampled.AudioInputStream ais =
-                new javax.sound.sampled.AudioInputStream(
-                        new java.io.ByteArrayInputStream(pcm),
-                        format,
-                        samples.length);
-
-        javax.sound.sampled.AudioSystem.write(
-                ais,
-                javax.sound.sampled.AudioFileFormat.Type.WAVE,
-                baos
-        );
-
-        return baos.toByteArray();
+        return org.example.voicingbackend.util.AudioPlayer.toWavBytes(samples, sampleRate);
     }
 
 }

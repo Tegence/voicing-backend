@@ -4,20 +4,24 @@ import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.json.JsonMapper;
 import com.fasterxml.jackson.core.json.JsonReadFeature;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 import java.io.InputStream;
 import java.util.*;
 
 public class VitsTokenizerService {
+    private static final Logger logger = LoggerFactory.getLogger(VitsTokenizerService.class);
 
     private final Map<String, Integer> vocab = new HashMap<>();
     private final int blankId;
     private final boolean addBlank;
+    private final TextToPhonemeService g2p;
 
     public VitsTokenizerService(String configResourcePath) {
+        this.g2p = new TextToPhonemeService();
 
         try {
-
             ObjectMapper mapper = JsonMapper.builder()
                     .enable(JsonReadFeature.ALLOW_NON_NUMERIC_NUMBERS)
                     .build();
@@ -29,7 +33,6 @@ public class VitsTokenizerService {
                 throw new RuntimeException("Config file not found: " + configResourcePath);
 
             JsonNode root = mapper.readTree(is);
-
             JsonNode chars = root.get("characters");
 
             if (chars == null)
@@ -43,8 +46,6 @@ public class VitsTokenizerService {
             addBlank = root.has("add_blank") && root.get("add_blank").asBoolean(true);
 
             List<String> vocabList = new ArrayList<>();
-
-            // pad is always index 0 in most VITS configs
             vocabList.add(pad);
 
             for (char c : characters.toCharArray())
@@ -64,9 +65,8 @@ public class VitsTokenizerService {
 
             blankId = vocab.get(pad);
 
-            System.out.println("Tokenizer loaded. Vocab size: " + vocab.size());
-            System.out.println("Blank ID: " + blankId);
-            System.out.println("Add blank: " + addBlank);
+            logger.info("Tokenizer loaded. Vocab size: {}, Blank ID: {}, Add blank: {}",
+                    vocab.size(), blankId, addBlank);
 
         } catch (Exception e) {
             throw new RuntimeException("Failed to load tokenizer config", e);
@@ -74,83 +74,58 @@ public class VitsTokenizerService {
     }
 
     public long[] textToIds(String text) {
-
-        System.out.println("Original text: " + text);
+        logger.debug("Original text: {}", text);
 
         if (text == null || text.isEmpty())
             return new long[0];
 
-        // Normalize
         text = normalize(text);
 
-        // Phonemize using centralized gRPC service
-        org.example.voicingbackend.service.TextToPhonemeService g2p = new org.example.voicingbackend.service.TextToPhonemeService();
-        org.example.voicingbackend.service.TextToPhonemeService.Result res = g2p.convert(text, "en", org.example.voicingbackend.service.TextToPhonemeService.PhonemeFormat.IPA, "en-ng");
+        TextToPhonemeService.Result res = g2p.convert(text, "en",
+                TextToPhonemeService.PhonemeFormat.IPA, "en-ng");
         String phonemes = cleanPhonemes(String.join("", res.flattened));
 
-        System.out.println("Clean phonemes: " + phonemes);
+        logger.debug("Clean phonemes: {}", phonemes);
 
         List<Long> ids = new ArrayList<>();
 
-        // Unicode-safe phoneme iteration
         for (int i = 0; i < phonemes.length(); ) {
-
             int codePoint = phonemes.codePointAt(i);
-
             String symbol = new String(Character.toChars(codePoint));
-
             Integer id = vocab.get(symbol);
 
             if (id != null) {
                 ids.add(id.longValue());
             } else {
                 if (!symbol.equals(" "))
-                    System.out.println("Unknown phoneme: " + symbol);
+                    logger.debug("Unknown phoneme: {}", symbol);
             }
 
             i += Character.charCount(codePoint);
         }
 
-        // Add blanks
         if (addBlank)
             ids = intersperse(ids, blankId);
 
         long[] result = ids.stream().mapToLong(Long::longValue).toArray();
-
-        System.out.println("Token IDs length: " + result.length);
-
+        logger.debug("Token IDs length: {}", result.length);
         return result;
     }
 
     private String normalize(String text) {
-
         text = text.toLowerCase();
         text = text.trim();
-
-        // optional: collapse multiple spaces
         text = text.replaceAll("\\s+", " ");
-
         return text;
     }
 
-    /**
-     * Official VITS blank intersperse
-     *
-     * Example:
-     * input:  [h,e,l,l,o]
-     * output: [_,h,_,e,_,l,_,l,_,o,_]
-     */
     private List<Long> intersperse(List<Long> original, int blankId) {
-
         List<Long> result = new ArrayList<>();
-
         result.add((long) blankId);
-
         for (Long id : original) {
             result.add(id);
             result.add((long) blankId);
         }
-
         return result;
     }
 
@@ -163,17 +138,14 @@ public class VitsTokenizerService {
     }
 
     private String cleanPhonemes(String phonemes) {
-
         if (phonemes == null)
             return "";
 
         return phonemes
-                .replaceAll("[ˈˌ]", "")   // remove stress markers
-                .replaceAll("[|‖]", "")   // remove separators
-                .replaceAll("[^\\p{L}\\p{M} ]", "") // keep only IPA letters
-                .replaceAll("\\s+", " ")  // normalize spaces
+                .replaceAll("[ˈˌ]", "")
+                .replaceAll("[|‖]", "")
+                .replaceAll("[^\\p{L}\\p{M} ]", "")
+                .replaceAll("\\s+", " ")
                 .trim();
     }
-
-    // Removed local phonemize method in favor of TextToPhonemeService
 }
