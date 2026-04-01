@@ -17,6 +17,9 @@ public class Main {
         int port = config.getServerPort();
         String host = config.getServerHost();
         
+        // Load CORS origins from configuration
+        String[] origins = config.getCorsAllowedOrigins();
+
         // Build Armeria server with gRPC and gRPC-Web enabled + CORS
         com.linecorp.armeria.server.Server server = com.linecorp.armeria.server.Server.builder()
                 .http(port)
@@ -29,9 +32,7 @@ public class Main {
                                 .build()
                 )
                 .decorator(
-                        com.linecorp.armeria.server.cors.CorsService.builder(
-                                        "http://localhost:3000",
-                                        "https://main.d14icug5aldywm.amplifyapp.com")
+                        com.linecorp.armeria.server.cors.CorsService.builder(origins)
                                 .allowRequestMethods(
                                         com.linecorp.armeria.common.HttpMethod.OPTIONS,
                                         com.linecorp.armeria.common.HttpMethod.POST)

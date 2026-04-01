@@ -20,13 +20,36 @@ import java.util.Optional;
 /**
  * MongoDB implementation of UserRepository
  */
-public class MongoUserRepository implements UserRepository {
+public class MongoUserRepository implements UserRepository, AutoCloseable {
     private static final Logger logger = LoggerFactory.getLogger(MongoUserRepository.class);
     
     private final MongoClient mongoClient;
     private final MongoDatabase database;
     private final MongoCollection<Document> usersCollection;
-    
+    private final boolean ownsClient;
+
+    /**
+     * Creates a new MongoUserRepository with an externally provided MongoClient.
+     * The caller retains ownership of the client; {@link #close()} will not close it.
+     *
+     * @param client       a shared MongoClient instance
+     * @param databaseName the name of the MongoDB database to use
+     */
+    public MongoUserRepository(MongoClient client, String databaseName) {
+        this.mongoClient = client;
+        this.database = mongoClient.getDatabase(databaseName);
+        this.usersCollection = database.getCollection("users");
+        this.ownsClient = false;
+
+        createIndexes();
+
+        logger.info("MongoDB user repository initialized with shared client");
+    }
+
+    /**
+     * @deprecated Use {@link #MongoUserRepository(MongoClient, String)} to share a MongoClient.
+     */
+    @Deprecated
     public MongoUserRepository() {
         ConfigurationManager config = ConfigurationManager.getInstance();
         
@@ -40,6 +63,7 @@ public class MongoUserRepository implements UserRepository {
         this.mongoClient = MongoClients.create(connectionString);
         this.database = mongoClient.getDatabase(databaseName);
         this.usersCollection = database.getCollection("users");
+        this.ownsClient = true;
         
         // Create indexes for better performance
         createIndexes();
@@ -216,10 +240,11 @@ public class MongoUserRepository implements UserRepository {
     }
     
     /**
-     * Closes the MongoDB connection
+     * Closes the MongoDB connection if this repository owns the client.
      */
+    @Override
     public void close() {
-        if (mongoClient != null) {
+        if (ownsClient && mongoClient != null) {
             mongoClient.close();
             logger.info("MongoDB connection closed");
         }

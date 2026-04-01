@@ -70,7 +70,14 @@ public class ConfigurationManager {
      */
     private void validateConfiguration() {
         logger.info("Validating configuration...");
-        
+
+        // Check JWT secret key
+        String jwtSecret = getString("jwt.secret.key", "");
+        if (jwtSecret.isEmpty() || jwtSecret.equals("change-me-in-production") || jwtSecret.length() < 32) {
+            throw new IllegalStateException(
+                "JWT secret key is not configured. Set the JWT_SECRET_KEY environment variable to a strong secret (at least 32 characters).");
+        }
+
         // Check GCS configuration
         String gcsProjectId = getGcsProjectId();
         String gcsBucketName = getGcsBucketName();
@@ -209,6 +216,11 @@ public class ConfigurationManager {
     
     public int getJwtExpirationHours() {
         return getInt("jwt.expiration.hours", 24);
+    }
+
+    public String[] getCorsAllowedOrigins() {
+        String origins = getString("cors.allowed.origins", "http://localhost:3000");
+        return origins.split(",");
     }
 
     // AWS / S3
