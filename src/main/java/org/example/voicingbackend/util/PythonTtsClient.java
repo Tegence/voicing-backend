@@ -7,6 +7,7 @@ import io.grpc.ManagedChannelBuilder;
 import org.example.voicingbackend.phonemes.PhonemeServiceGrpc;
 import org.example.voicingbackend.phonemes.TextRequest;
 import org.example.voicingbackend.phonemes.TokenResponse;
+import org.example.voicingbackend.config.ConfigurationManager;
 
 import java.net.URI;
 import java.net.URLEncoder;
@@ -17,6 +18,18 @@ import java.nio.charset.StandardCharsets;
 import java.util.Map;
 
 public class PythonTtsClient {
+
+    private final String host;
+    private final String port;
+    private final boolean tls;
+
+    public PythonTtsClient() {
+        ConfigurationManager cfg = ConfigurationManager.getInstance();
+        this.host = cfg.getString("phoneme.remote.host", "localhost");
+        this.port = cfg.getString("phoneme.remote.port", "443");
+        this.tls = cfg.getBoolean("phoneme.remote.tls", true);
+
+    }
 
     public long[] fetchTokenIdsFromhttp(String text) throws Exception {
 
@@ -65,11 +78,13 @@ public class PythonTtsClient {
 
     public long[] fetchTokenIdsFromGrpc(String text) {
 
-        // 1. Create channel (connect to your Docker gRPC server)
-        ManagedChannel channel = ManagedChannelBuilder
-                .forAddress("localhost", 50051)
-                .usePlaintext()
-                .build();
+        ManagedChannelBuilder<?> builder =
+                ManagedChannelBuilder.forTarget(host + ":" + port);
+
+        if (!tls) {
+            builder.usePlaintext();
+        }
+        ManagedChannel channel = builder.build();
 
         // 2. Create stub (client)
         PhonemeServiceGrpc.PhonemeServiceBlockingStub stub =
@@ -92,7 +107,6 @@ public class PythonTtsClient {
 
         // 6. Shutdown channel
         channel.shutdown();
-        System.out.println(ids);
         return ids;
     }
 }

@@ -574,7 +574,7 @@ public class TTSService {
             long[] inputLengths = new long[]{inputIds.length};
 
             // scales [3] — noise_scale, length_scale, noise_scale_w
-            float[] scales = new float[]{0.5f, 1.2f, 0.6f};
+            float[] scales = new float[]{1.0f, 1.8f, 1.0f};
 
             java.util.Map<String, OnnxTensor> feeds = new java.util.HashMap<>();
             feeds.put("input", OnnxTensor.createTensor(env, ids2d));
