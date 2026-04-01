@@ -46,6 +46,7 @@ import org.example.voicingbackend.audiomodel.VerifyUserResponse;
 import org.example.voicingbackend.audiomodel.EnrolUserVoiceRequest;
 import org.example.voicingbackend.audiomodel.EnrolUserVoiceResponse;
 import org.example.voicingbackend.util.PythonTtsClient;
+import org.example.voicingbackend.config.ServiceRegistry;
 import org.example.voicingbackend.audiomodel.TextToSpeechvitsRequest;
 import org.example.voicingbackend.audiomodel.TextToSpeechvitsResponse;
 import org.slf4j.Logger;
@@ -68,6 +69,28 @@ public class AudioModelController extends AudioModelServiceGrpc.AudioModelServic
     private final org.example.voicingbackend.repository.impl.MongoEmbeddingRepository embeddingRepository;
     private final PythonTtsClient pythonTtsClient;
     
+    /**
+     * Creates an AudioModelController with all services pulled from a ServiceRegistry.
+     *
+     * @param registry the centralized service registry
+     */
+    public AudioModelController(ServiceRegistry registry) {
+        this.authService = registry.getAuthService();
+        this.audioModelService = registry.getAudioModelService();
+        this.gcsService = registry.getGcsService();
+        this.s3Service = registry.getS3Service();
+        this.embeddingRepository = registry.getEmbeddingRepository();
+        this.openAITranscriptionService = registry.getOpenAITranscriptionService();
+        this.textToPhonemeService = registry.getTextToPhonemeService();
+        this.ttsService = registry.getTtsService();
+        this.sentenceService = registry.getSentenceService();
+        this.pythonTtsClient = registry.getPythonTtsClient();
+    }
+
+    /**
+     * @deprecated Use {@link #AudioModelController(ServiceRegistry)} for dependency injection.
+     */
+    @Deprecated
     public AudioModelController() {
         this.authService = new AuthenticationService();
         this.audioModelService = new AudioModelService();

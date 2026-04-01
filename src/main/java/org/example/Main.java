@@ -2,6 +2,7 @@ package org.example;
 
 import org.example.voicingbackend.controller.AudioModelController;
 import org.example.voicingbackend.config.ConfigurationManager;
+import org.example.voicingbackend.config.ServiceRegistry;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -20,13 +21,16 @@ public class Main {
         // Load CORS origins from configuration
         String[] origins = config.getCorsAllowedOrigins();
 
+        // Initialise shared service registry (single MongoClient, shared repos & services)
+        ServiceRegistry registry = new ServiceRegistry();
+
         // Build Armeria server with gRPC and gRPC-Web enabled + CORS
         com.linecorp.armeria.server.Server server = com.linecorp.armeria.server.Server.builder()
                 .http(port)
                 .accessLogWriter(com.linecorp.armeria.server.logging.AccessLogWriter.common(), true)
                 .service(
                         com.linecorp.armeria.server.grpc.GrpcService.builder()
-                                .addService((io.grpc.BindableService) new AudioModelController())
+                                .addService((io.grpc.BindableService) new AudioModelController(registry))
                                 .supportedSerializationFormats(
                                         com.linecorp.armeria.common.grpc.GrpcSerializationFormats.values())
                                 .build()
@@ -56,6 +60,11 @@ public class Main {
         server.start().join();
         logger.info("Armeria gRPC server started on {}:{}", host, port);
         logger.info("gRPC-Web enabled; CORS configured for any origin");
+
+        // Ensure graceful shutdown of shared resources
+        Runtime.getRuntime().addShutdownHook(new Thread(() -> {
+            registry.close();
+        }));
 
         // Keep running
         try {

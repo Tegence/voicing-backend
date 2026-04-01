@@ -27,14 +27,32 @@ public class AuthenticationService {
     private final SecretKey jwtSecretKey;
     private final int jwtExpirationHours;
     
+    /**
+     * Creates an AuthenticationService with injected dependencies.
+     *
+     * @param userRepo an externally managed MongoUserRepository
+     * @param config   the application ConfigurationManager
+     */
+    public AuthenticationService(MongoUserRepository userRepo, ConfigurationManager config) {
+        this.userRepository = userRepo;
+        String secretKey = config.getJwtSecretKey();
+        this.jwtSecretKey = Keys.hmacShaKeyFor(secretKey.getBytes());
+        this.jwtExpirationHours = config.getJwtExpirationHours();
+        logger.info("Authentication service initialized (injected)");
+    }
+
+    /**
+     * @deprecated Use {@link #AuthenticationService(MongoUserRepository, ConfigurationManager)} for dependency injection.
+     */
+    @Deprecated
     public AuthenticationService() {
         this.userRepository = new MongoUserRepository();
-        
+
         ConfigurationManager config = ConfigurationManager.getInstance();
         String secretKey = config.getJwtSecretKey();
         this.jwtSecretKey = Keys.hmacShaKeyFor(secretKey.getBytes());
         this.jwtExpirationHours = config.getJwtExpirationHours();
-        
+
         logger.info("Authentication service initialized");
     }
     

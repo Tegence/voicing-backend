@@ -17,16 +17,43 @@ import java.util.Map;
  */
 public class AudioModelService {
     private static final Logger logger = LoggerFactory.getLogger(AudioModelService.class);
-    
+
     private final PyTorchAudioModelLoader modelLoader;
+    private final org.example.voicingbackend.repository.impl.MongoEmbeddingRepository embeddingRepository;
     private AudioModel currentModel;
     private ForegroundBackgroundSeparator separator; // optional DJL-based separator
     private SpeakerEmbeddingExtractor embedder; // ONNX-based speaker embedder
-    
+
+    /**
+     * Creates an AudioModelService with an injected embedding repository.
+     *
+     * @param embeddingRepo a shared MongoEmbeddingRepository instance
+     */
+    public AudioModelService(org.example.voicingbackend.repository.impl.MongoEmbeddingRepository embeddingRepo) {
+        this.embeddingRepository = embeddingRepo;
+        this.modelLoader = new PyTorchAudioModelLoader();
+        this.currentModel = null;
+        logger.info("Audio model service initialized (injected)");
+        initModels();
+    }
+
+    /**
+     * @deprecated Use {@link #AudioModelService(org.example.voicingbackend.repository.impl.MongoEmbeddingRepository)} for dependency injection.
+     */
+    @Deprecated
     public AudioModelService() {
+        this.embeddingRepository = new org.example.voicingbackend.repository.impl.MongoEmbeddingRepository();
         this.modelLoader = new PyTorchAudioModelLoader();
         this.currentModel = null;
         logger.info("Audio model service initialized");
+        initModels();
+    }
+
+    /**
+     * Loads optional suppression and speaker-embedding ONNX models based on configuration.
+     * Called by all constructors.
+     */
+    private void initModels() {
         // Try to load suppression model if configured
         try {
             String path = ConfigurationManager.getInstance().getString("audio.suppression.model.path", "");
@@ -188,8 +215,7 @@ public class AudioModelService {
             }
             float[] query = embedder.embed(speechOnly, true);
             // Fetch reference embeddings for user
-            org.example.voicingbackend.repository.impl.MongoEmbeddingRepository repo = new org.example.voicingbackend.repository.impl.MongoEmbeddingRepository();
-            java.util.List<float[]> refs = repo.findByUserId(userId, 100);
+            java.util.List<float[]> refs = this.embeddingRepository.findByUserId(userId, 100);
             if (refs.isEmpty()) return new VerifyResult(false, 0f, 0f, false, "No reference embeddings for user");
             float maxSim = -1f;
             for (float[] r : refs) {
