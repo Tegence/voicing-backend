@@ -5,6 +5,8 @@ import org.slf4j.LoggerFactory;
 
 import javax.sound.sampled.*;
 import java.io.*;
+import java.nio.ByteBuffer;
+import java.nio.ByteOrder;
 
 public class AudioPlayer {
     private static final Logger logger = LoggerFactory.getLogger(AudioPlayer.class);
@@ -26,6 +28,15 @@ public class AudioPlayer {
         AudioSystem.write(ais, AudioFileFormat.Type.WAVE, new File(filename));
 
         logger.info("Saved WAV to {}", filename);
+    }
+
+    public static byte[] toRawBytes(float[] samples) {
+        byte[] raw = new byte[samples.length * 4];
+        ByteBuffer buffer = ByteBuffer.wrap(raw).order(ByteOrder.LITTLE_ENDIAN);
+        for (float s : samples) {
+            buffer.putFloat(s);
+        }
+        return raw;
     }
 
     public static byte[] toWavBytes(float[] samples, int sampleRate) throws Exception {

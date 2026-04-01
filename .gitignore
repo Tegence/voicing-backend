@@ -29,7 +29,6 @@ build/
 !**/src/test/**/build/
 
 ### VS Code ###
-.vscode/
 
 ### Mac OS ###
 .DS_Store
@@ -49,3 +48,7 @@ src/main/resources/baked_model.onnx
 src/main/resources/fastspeech2_ljspeech.onnx
 src/main/resources/fastspeech2_traced.pt
 src/main/resources/hifigan_ljspeech.onnx
+branch_structure.json
+temp_auto_push.bat
+temp_interactive_push.bat
+.gitignore

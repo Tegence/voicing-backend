@@ -50,6 +50,11 @@ public interface UserRepository {
      * Gets all active users
      */
     List<User> findAllActiveUsers();
+
+    /**
+     * Gets active users with pagination
+     */
+    List<User> findAllActiveUsers(int page, int pageSize);
     
     /**
      * Checks if a user exists and is active

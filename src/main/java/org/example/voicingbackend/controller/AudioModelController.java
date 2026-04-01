@@ -46,6 +46,8 @@ import org.example.voicingbackend.audiomodel.VerifyUserResponse;
 import org.example.voicingbackend.audiomodel.EnrolUserVoiceRequest;
 import org.example.voicingbackend.audiomodel.EnrolUserVoiceResponse;
 import org.example.voicingbackend.util.PythonTtsClient;
+import org.example.voicingbackend.config.ConfigurationManager;
+import org.example.voicingbackend.config.ServiceRegistry;
 import org.example.voicingbackend.audiomodel.TextToSpeechvitsRequest;
 import org.example.voicingbackend.audiomodel.TextToSpeechvitsResponse;
 import org.slf4j.Logger;
@@ -67,7 +69,31 @@ public class AudioModelController extends AudioModelServiceGrpc.AudioModelServic
     private final org.example.voicingbackend.service.SentenceService sentenceService;
     private final org.example.voicingbackend.repository.impl.MongoEmbeddingRepository embeddingRepository;
     private final PythonTtsClient pythonTtsClient;
-    
+    private final int maxAudioSamples;
+
+    /**
+     * Creates an AudioModelController with all services pulled from a ServiceRegistry.
+     *
+     * @param registry the centralized service registry
+     */
+    public AudioModelController(ServiceRegistry registry) {
+        this.authService = registry.getAuthService();
+        this.audioModelService = registry.getAudioModelService();
+        this.gcsService = registry.getGcsService();
+        this.s3Service = registry.getS3Service();
+        this.embeddingRepository = registry.getEmbeddingRepository();
+        this.openAITranscriptionService = registry.getOpenAITranscriptionService();
+        this.textToPhonemeService = registry.getTextToPhonemeService();
+        this.ttsService = registry.getTtsService();
+        this.sentenceService = registry.getSentenceService();
+        this.pythonTtsClient = registry.getPythonTtsClient();
+        this.maxAudioSamples = ConfigurationManager.getInstance().getInt("audio.max.samples", 10_000_000);
+    }
+
+    /**
+     * @deprecated Use {@link #AudioModelController(ServiceRegistry)} for dependency injection.
+     */
+    @Deprecated
     public AudioModelController() {
         this.authService = new AuthenticationService();
         this.audioModelService = new AudioModelService();
@@ -79,6 +105,7 @@ public class AudioModelController extends AudioModelServiceGrpc.AudioModelServic
         this.ttsService = new TTSService();
         this.sentenceService = new org.example.voicingbackend.service.SentenceService();
         this.pythonTtsClient = new PythonTtsClient();
+        this.maxAudioSamples = ConfigurationManager.getInstance().getInt("audio.max.samples", 10_000_000);
     }
     
     // Authentication endpoints
@@ -184,6 +211,17 @@ public class AudioModelController extends AudioModelServiceGrpc.AudioModelServic
         responseObserver.onCompleted();
     }
     
+    private boolean validateAudioSize(int sampleCount, StreamObserver<?> responseObserver) {
+        if (sampleCount > maxAudioSamples) {
+            responseObserver.onError(
+                io.grpc.Status.INVALID_ARGUMENT
+                    .withDescription("audio_samples exceeds maximum of " + maxAudioSamples)
+                    .asRuntimeException());
+            return false;
+        }
+        return true;
+    }
+
     // Audio model endpoints
     
     @Override
@@ -218,9 +256,10 @@ public class AudioModelController extends AudioModelServiceGrpc.AudioModelServic
     @Override
     public void processAudio(ProcessAudioRequest request, StreamObserver<ProcessAudioResponse> responseObserver) {
         logger.info("Received process audio request with {} samples", request.getAudioSamplesCount());
-        
+        if (!validateAudioSize(request.getAudioSamplesCount(), responseObserver)) return;
+
         ProcessAudioResponse.Builder responseBuilder = ProcessAudioResponse.newBuilder();
-        
+
         try {
             // Convert protobuf list to array
             float[] audioSamples = new float[request.getAudioSamplesCount()];
@@ -247,7 +286,7 @@ public class AudioModelController extends AudioModelServiceGrpc.AudioModelServic
         } catch (Exception e) {
             logger.error("Process audio failed", e);
             responseBuilder.setSuccess(false)
-                          .setErrorMessage("Process audio failed: " + e.getMessage());
+                          .setErrorMessage("An internal error occurred. Please try again.");
         }
         
         responseObserver.onNext(responseBuilder.build());
@@ -257,9 +296,10 @@ public class AudioModelController extends AudioModelServiceGrpc.AudioModelServic
     @Override
     public void saveAudioToGCS(SaveAudioRequest request, StreamObserver<SaveAudioResponse> responseObserver) {
         logger.info("Received save audio to GCS request for: {}", request.getFileName());
-        
+        if (!validateAudioSize(request.getAudioSamplesCount(), responseObserver)) return;
+
         SaveAudioResponse.Builder responseBuilder = SaveAudioResponse.newBuilder();
-        
+
         try {
             // Convert protobuf list to array
             float[] audioSamples = new float[request.getAudioSamplesCount()];
@@ -311,7 +351,7 @@ public class AudioModelController extends AudioModelServiceGrpc.AudioModelServic
         } catch (Exception e) {
             logger.error("Save audio to GCS failed", e);
             responseBuilder.setSuccess(false)
-                          .setErrorMessage("Save audio to GCS failed: " + e.getMessage());
+                          .setErrorMessage("An internal error occurred. Please try again.");
         }
         
         responseObserver.onNext(responseBuilder.build());
@@ -321,6 +361,7 @@ public class AudioModelController extends AudioModelServiceGrpc.AudioModelServic
     @Override
     public void suppressBackground(SuppressBackgroundRequest request, StreamObserver<SuppressBackgroundResponse> responseObserver) {
         logger.info("Received suppress background request with {} samples", request.getAudioSamplesCount());
+        if (!validateAudioSize(request.getAudioSamplesCount(), responseObserver)) return;
         SuppressBackgroundResponse.Builder responseBuilder = SuppressBackgroundResponse.newBuilder();
         try {
             float[] audio = new float[request.getAudioSamplesCount()];
@@ -337,7 +378,7 @@ public class AudioModelController extends AudioModelServiceGrpc.AudioModelServic
             if (result.getErrorMessage() != null) responseBuilder.setErrorMessage(result.getErrorMessage());
         } catch (Exception e) {
             logger.error("Suppress background failed", e);
-            responseBuilder.setSuccess(false).setErrorMessage("Suppress background failed: " + e.getMessage());
+            responseBuilder.setSuccess(false).setErrorMessage("An internal error occurred. Please try again.");
         }
         responseObserver.onNext(responseBuilder.build());
         responseObserver.onCompleted();
@@ -346,6 +387,7 @@ public class AudioModelController extends AudioModelServiceGrpc.AudioModelServic
     @Override
     public void extractEmbeddings(ExtractEmbeddingsRequest request, StreamObserver<ExtractEmbeddingsResponse> responseObserver) {
         logger.info("Received extract embeddings request with {} samples", request.getAudioSamplesCount());
+        if (!validateAudioSize(request.getAudioSamplesCount(), responseObserver)) return;
         ExtractEmbeddingsResponse.Builder resp = ExtractEmbeddingsResponse.newBuilder();
         try {
             float[] audio = new float[request.getAudioSamplesCount()];
@@ -368,7 +410,7 @@ public class AudioModelController extends AudioModelServiceGrpc.AudioModelServic
             }
         } catch (Exception e) {
             logger.error("Extract embeddings failed", e);
-            resp.setSuccess(false).setErrorMessage("Extract embeddings failed: " + e.getMessage());
+            resp.setSuccess(false).setErrorMessage("An internal error occurred. Please try again.");
         }
         responseObserver.onNext(resp.build());
         responseObserver.onCompleted();
@@ -377,6 +419,7 @@ public class AudioModelController extends AudioModelServiceGrpc.AudioModelServic
     @Override
     public void verifyUser(VerifyUserRequest request, StreamObserver<VerifyUserResponse> responseObserver) {
         logger.info("Received verify user request for userId={} samples={} rate={}", request.getUserId(), request.getAudioSamplesCount(), request.getSampleRate());
+        if (!validateAudioSize(request.getAudioSamplesCount(), responseObserver)) return;
         VerifyUserResponse.Builder resp = VerifyUserResponse.newBuilder();
         try {
             float[] audio = new float[request.getAudioSamplesCount()];
@@ -389,7 +432,7 @@ public class AudioModelController extends AudioModelServiceGrpc.AudioModelServic
             if (!vr.success && vr.error != null) resp.setErrorMessage(vr.error);
         } catch (Exception e) {
             logger.error("VerifyUser failed", e);
-            resp.setSuccess(false).setErrorMessage("VerifyUser failed: " + e.getMessage());
+            resp.setSuccess(false).setErrorMessage("An internal error occurred. Please try again.");
         }
         responseObserver.onNext(resp.build());
         responseObserver.onCompleted();
@@ -398,6 +441,7 @@ public class AudioModelController extends AudioModelServiceGrpc.AudioModelServic
     @Override
     public void enrolUserVoice(EnrolUserVoiceRequest request, StreamObserver<EnrolUserVoiceResponse> responseObserver) {
         logger.info("Received enrol user voice for userId={} samples={} rate={}", request.getUserId(), request.getAudioSamplesCount(), request.getSampleRate());
+        if (!validateAudioSize(request.getAudioSamplesCount(), responseObserver)) return;
         EnrolUserVoiceResponse.Builder resp = EnrolUserVoiceResponse.newBuilder();
         try {
             String userId = request.getUserId();
@@ -439,7 +483,7 @@ public class AudioModelController extends AudioModelServiceGrpc.AudioModelServic
             resp.setSuccess(true).setS3Uri(s3res.s3Uri).setChunksStored(1);
         } catch (Exception e) {
             logger.error("enrolUserVoice failed", e);
-            resp.setSuccess(false).setErrorMessage("enrolUserVoice failed: " + e.getMessage());
+            resp.setSuccess(false).setErrorMessage("An internal error occurred. Please try again.");
         }
         responseObserver.onNext(resp.build());
         responseObserver.onCompleted();
@@ -508,7 +552,7 @@ public class AudioModelController extends AudioModelServiceGrpc.AudioModelServic
             }
         } catch (Exception e) {
             logger.error("transcribeAudio failed", e);
-            resp.setSuccess(false).setErrorMessage("transcribeAudio failed: " + e.getMessage());
+            resp.setSuccess(false).setErrorMessage("An internal error occurred. Please try again.");
         }
         responseObserver.onNext(resp.build());
         responseObserver.onCompleted();
@@ -543,7 +587,7 @@ public class AudioModelController extends AudioModelServiceGrpc.AudioModelServic
             }
         } catch (Exception e) {
             logger.error("textToPhoneme failed", e);
-            resp.setSuccess(false).setErrorMessage("textToPhoneme failed: " + e.getMessage());
+            resp.setSuccess(false).setErrorMessage("An internal error occurred. Please try again.");
         }
         responseObserver.onNext(resp.build());
         responseObserver.onCompleted();
@@ -563,7 +607,7 @@ public class AudioModelController extends AudioModelServiceGrpc.AudioModelServic
             }
         } catch (Exception e) {
             logger.error("textToSpeech failed", e);
-            resp.setSuccess(false).setErrorMessage("textToSpeech failed: " + e.getMessage());
+            resp.setSuccess(false).setErrorMessage("An internal error occurred. Please try again.");
         }
         responseObserver.onNext(resp.build());
         responseObserver.onCompleted();
@@ -583,7 +627,7 @@ public class AudioModelController extends AudioModelServiceGrpc.AudioModelServic
             resp.setSuccess(true).setSentence(sentence).setWordCount(count);
         } catch (Exception e) {
             logger.error("generateSentence failed", e);
-            resp.setSuccess(false).setErrorMessage("generateSentence failed: " + e.getMessage());
+            resp.setSuccess(false).setErrorMessage("An internal error occurred. Please try again.");
         }
         responseObserver.onNext(resp.build());
         responseObserver.onCompleted();
@@ -601,7 +645,7 @@ public class AudioModelController extends AudioModelServiceGrpc.AudioModelServic
             for (String w : words) resp.addWords(w);
         } catch (Exception e) {
             logger.error("generateJuxtaposition failed", e);
-            resp.setSuccess(false).setErrorMessage("generateJuxtaposition failed: " + e.getMessage());
+            resp.setSuccess(false).setErrorMessage("An internal error occurred. Please try again.");
         }
         responseObserver.onNext(resp.build());
         responseObserver.onCompleted();
@@ -632,8 +676,9 @@ public class AudioModelController extends AudioModelServiceGrpc.AudioModelServic
             responseObserver.onCompleted();
 
         } catch (Exception e) {
+            logger.error("textToSpeechVits failed", e);
             responseObserver.onError(
-                    Status.INTERNAL.withDescription(e.getMessage()).asRuntimeException()
+                    Status.INTERNAL.withDescription("An internal error occurred. Please try again.").asRuntimeException()
             );
         }
     }

@@ -4,6 +4,7 @@ import com.google.auth.oauth2.GoogleCredentials;
 import com.google.cloud.storage.*;
 import org.example.voicingbackend.audiomodel.AudioFormat;
 import org.example.voicingbackend.config.ConfigurationManager;
+import org.example.voicingbackend.util.AudioPlayer;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -11,12 +12,9 @@ import java.nio.file.Path;
 import java.util.HashMap;
 import java.util.Map;
 
-import java.io.ByteArrayOutputStream;
 import java.io.FileInputStream;
 import java.io.InputStream;
 import java.io.IOException;
-import java.nio.ByteBuffer;
-import java.nio.ByteOrder;
 import java.nio.file.Files;
 import java.nio.file.Paths;
 import java.util.Collections;
@@ -29,7 +27,8 @@ public class GoogleCloudStorageService {
     private static final Logger logger = LoggerFactory.getLogger(GoogleCloudStorageService.class);
     
     private final Storage storage;
-    private static final String LOCAL_MODEL_DIR = "/src/main/resources";
+    private static final String LOCAL_MODEL_DIR = ConfigurationManager.getInstance()
+        .getString("gcs.local.model.dir", "/gcs/voicing-models-abas");
     
     public GoogleCloudStorageService() {
         ConfigurationManager config = ConfigurationManager.getInstance();
@@ -155,7 +154,7 @@ public class GoogleCloudStorageService {
             
         } catch (com.google.cloud.storage.StorageException se) {
             logger.error("GCS error code={}, reason={}, location={}, msg={}", se.getCode(), se.getReason(), se.getLocation(), se.getMessage(), se);
-            return new SaveAudioResult(false, null, fileName, 0, "GCS " + se.getCode() + " " + se.getReason() + ": " + se.getMessage());
+            return new SaveAudioResult(false, null, fileName, 0, "Storage operation failed");
         } catch (Exception e) {
             logger.error("Failed to save audio to GCS: {}", e.getMessage(), e);
             return new SaveAudioResult(false, null, fileName, 0, e.getMessage());
@@ -165,79 +164,21 @@ public class GoogleCloudStorageService {
     /**
      * Converts audio samples to bytes based on format
      */
-    private byte[] convertAudioToBytes(float[] audioSamples, int sampleRate, AudioFormat format) throws IOException {
+    private byte[] convertAudioToBytes(float[] audioSamples, int sampleRate, AudioFormat format) throws Exception {
         switch (format) {
             case WAV:
-                return convertToWav(audioSamples, sampleRate);
+                return AudioPlayer.toWavBytes(audioSamples, sampleRate);
             case RAW:
-                return convertToRaw(audioSamples);
+                return AudioPlayer.toRawBytes(audioSamples);
             case MP3:
             case FLAC:
             case OGG:
                 // For now, convert to WAV as these formats require additional libraries
                 logger.warn("Format {} not fully supported, converting to WAV", format);
-                return convertToWav(audioSamples, sampleRate);
+                return AudioPlayer.toWavBytes(audioSamples, sampleRate);
             default:
                 throw new IllegalArgumentException("Unsupported audio format: " + format);
         }
-    }
-    
-    /**
-     * Converts audio samples to WAV format
-     */
-    private byte[] convertToWav(float[] audioSamples, int sampleRate) throws IOException {
-        ByteArrayOutputStream baos = new ByteArrayOutputStream();
-        
-        // WAV header (44 bytes)
-        writeWavHeader(baos, audioSamples.length, sampleRate);
-        
-        // Audio data
-        for (float sample : audioSamples) {
-            // Convert float [-1, 1] to 16-bit PCM
-            short pcmSample = (short) (sample * 32767.0f);
-            baos.write(pcmSample & 0xFF);
-            baos.write((pcmSample >> 8) & 0xFF);
-        }
-        
-        return baos.toByteArray();
-    }
-    
-    /**
-     * Writes WAV header to output stream
-     */
-    private void writeWavHeader(ByteArrayOutputStream baos, int numSamples, int sampleRate) throws IOException {
-        // RIFF header
-        baos.write("RIFF".getBytes());
-        writeInt(baos, 36 + numSamples * 2); // File size - 8
-        baos.write("WAVE".getBytes());
-        
-        // Format chunk
-        baos.write("fmt ".getBytes());
-        writeInt(baos, 16); // Chunk size
-        writeShort(baos, 1); // Audio format (PCM)
-        writeShort(baos, 1); // Number of channels
-        writeInt(baos, sampleRate); // Sample rate
-        writeInt(baos, sampleRate * 2); // Byte rate
-        writeShort(baos, 2); // Block align
-        writeShort(baos, 16); // Bits per sample
-        
-        // Data chunk
-        baos.write("data".getBytes());
-        writeInt(baos, numSamples * 2); // Data size
-    }
-    
-    /**
-     * Converts audio samples to raw PCM format
-     */
-    private byte[] convertToRaw(float[] audioSamples) {
-        byte[] rawBytes = new byte[audioSamples.length * 4]; // 32-bit float
-        ByteBuffer buffer = ByteBuffer.wrap(rawBytes).order(ByteOrder.LITTLE_ENDIAN);
-        
-        for (float sample : audioSamples) {
-            buffer.putFloat(sample);
-        }
-        
-        return rawBytes;
     }
     
     /**
@@ -289,24 +230,6 @@ public class GoogleCloudStorageService {
             logger.error("Failed to create bucket {}: {}", bucketName, e.getMessage(), e);
             return false;
         }
-    }
-    
-    /**
-     * Writes integer in little-endian format
-     */
-    private void writeInt(ByteArrayOutputStream baos, int value) throws IOException {
-        baos.write(value & 0xFF);
-        baos.write((value >> 8) & 0xFF);
-        baos.write((value >> 16) & 0xFF);
-        baos.write((value >> 24) & 0xFF);
-    }
-    
-    /**
-     * Writes short in little-endian format
-     */
-    private void writeShort(ByteArrayOutputStream baos, int value) throws IOException {
-        baos.write(value & 0xFF);
-        baos.write((value >> 8) & 0xFF);
     }
     
     /**

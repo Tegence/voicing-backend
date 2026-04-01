@@ -13,18 +13,40 @@ import org.slf4j.LoggerFactory;
 import java.util.ArrayList;
 import java.util.List;
 
-public class MongoEmbeddingRepository implements EmbeddingRepository {
+public class MongoEmbeddingRepository implements EmbeddingRepository, AutoCloseable {
     private static final Logger logger = LoggerFactory.getLogger(MongoEmbeddingRepository.class);
 
     private final MongoClient client;
     private final MongoDatabase db;
     private final MongoCollection<Document> col;
+    private final boolean ownsClient;
 
+    /**
+     * Creates a new MongoEmbeddingRepository with an externally provided MongoClient.
+     * The caller retains ownership of the client; {@link #close()} will not close it.
+     *
+     * @param client       a shared MongoClient instance
+     * @param databaseName the name of the MongoDB database to use
+     */
+    public MongoEmbeddingRepository(MongoClient client, String databaseName) {
+        this.client = client;
+        this.db = client.getDatabase(databaseName);
+        this.col = db.getCollection("embeddings");
+        this.ownsClient = false;
+
+        logger.info("MongoDB embedding repository initialized with shared client");
+    }
+
+    /**
+     * @deprecated Use {@link #MongoEmbeddingRepository(MongoClient, String)} to share a MongoClient.
+     */
+    @Deprecated
     public MongoEmbeddingRepository() {
         ConfigurationManager cfg = ConfigurationManager.getInstance();
         this.client = MongoClients.create(cfg.getMongoDbConnectionString());
         this.db = client.getDatabase(cfg.getMongoDbDatabaseName());
         this.col = db.getCollection("embeddings");
+        this.ownsClient = true;
     }
 
     @Override
@@ -60,6 +82,17 @@ public class MongoEmbeddingRepository implements EmbeddingRepository {
             logger.error("Failed to fetch embeddings: {}", e.getMessage(), e);
         }
         return out;
+    }
+
+    /**
+     * Closes the MongoDB connection if this repository owns the client.
+     */
+    @Override
+    public void close() {
+        if (ownsClient && client != null) {
+            client.close();
+            logger.info("MongoDB embedding connection closed");
+        }
     }
 }
 

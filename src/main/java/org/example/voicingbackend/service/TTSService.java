@@ -30,34 +30,58 @@ public class TTSService {
     private final TextToPhonemeService g2p;
     private final TextToPhonemeService.PhonemeFormat phonemeFormat;
 
-    private final String fastspeechPath;
-    private final String fastspeechOnnxPath;
-    private final String hifiganPath;
-    private final int defaultSampleRate;
+    private String fastspeechPath;
+    private String fastspeechOnnxPath;
+    private String hifiganPath;
+    private int defaultSampleRate;
 
     // Baked ONNX (direct waveform) configuration
-    private final String bakedOnnxPath;
-    private final String bakedVocabResource;
-    private final int bakedSampleRate;
+    private String bakedOnnxPath;
+    private String bakedVocabResource;
+    private int bakedSampleRate;
     private volatile java.util.Map<String, Integer> ipaVocab;
     private volatile java.util.Map<String, Integer> vitsVocab;
 
     // Vits ONNX
-    private final String vitsOnnxPath;
-    private final String vitsVocabResources;
+    private String vitsOnnxPath;
+    private String vitsVocabResources;
     private final PythonTtsClient ttsClient;
 
+    /**
+     * Creates a TTSService with injected dependencies.
+     *
+     * @param g2p       an externally managed TextToPhonemeService
+     * @param ttsClient an externally managed PythonTtsClient
+     */
+    public TTSService(TextToPhonemeService g2p, PythonTtsClient ttsClient) {
+        this.g2p = g2p;
+        this.ttsClient = ttsClient;
+        this.phonemeFormat = TextToPhonemeService.PhonemeFormat.ARPABET;
+        initConfig();
+    }
+
+    /**
+     * @deprecated Use {@link #TTSService(TextToPhonemeService, PythonTtsClient)} for dependency injection.
+     */
+    @Deprecated
     public TTSService() {
         this.g2p = new TextToPhonemeService();
         this.ttsClient = new PythonTtsClient();
         this.phonemeFormat = TextToPhonemeService.PhonemeFormat.ARPABET;
+        initConfig();
+    }
+
+    /**
+     * Loads TTS model paths and sample-rate settings from ConfigurationManager.
+     * Called by all constructors.
+     */
+    private void initConfig() {
         ConfigurationManager cfg = ConfigurationManager.getInstance();
         this.fastspeechPath = cfg.getString("tts.fastspeech.path", "src/main/resources/fastspeech2_traced.pt");
         this.fastspeechOnnxPath = cfg.getString("tts.fastspeech.onnx.path", "");
         this.hifiganPath = cfg.getString("tts.hifigan.path", "src/main/resources/hifigan_ljspeech.onnx");
         this.vitsOnnxPath = cfg.getString("tts.vits.onnx.path", "src/main/resources/vits_model.onnx");
         this.defaultSampleRate = cfg.getInt("tts.sample.rate", 22050);
-
 
         // Baked model defaults
         this.bakedOnnxPath = cfg.getString("tts.baked.onnx.path", "src/main/resources/baked_model.onnx");
