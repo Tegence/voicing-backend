@@ -193,9 +193,16 @@ public class MongoUserRepository implements UserRepository, AutoCloseable {
     
     @Override
     public List<User> findAllActiveUsers() {
+        return findAllActiveUsers(0, 100);
+    }
+
+    @Override
+    public List<User> findAllActiveUsers(int page, int pageSize) {
         List<User> users = new ArrayList<>();
         try {
             usersCollection.find(Filters.eq("active", true))
+                .skip(page * pageSize)
+                .limit(pageSize)
                 .forEach(doc -> users.add(User.fromDocument(doc)));
         } catch (Exception e) {
             logger.error("Failed to get active users: {}", e.getMessage(), e);

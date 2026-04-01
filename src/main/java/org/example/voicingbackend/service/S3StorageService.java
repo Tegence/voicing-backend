@@ -2,6 +2,7 @@ package org.example.voicingbackend.service;
 
 import org.example.voicingbackend.audiomodel.AudioFormat;
 import org.example.voicingbackend.config.ConfigurationManager;
+import org.example.voicingbackend.util.AudioPlayer;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import software.amazon.awssdk.auth.credentials.AwsBasicCredentials;
@@ -15,10 +16,6 @@ import software.amazon.awssdk.services.s3.model.NoSuchBucketException;
 import software.amazon.awssdk.services.s3.model.PutObjectRequest;
 import software.amazon.awssdk.services.s3.model.S3Exception;
 
-import java.io.ByteArrayOutputStream;
-import java.io.IOException;
-import java.nio.ByteBuffer;
-import java.nio.ByteOrder;
 import java.util.HashMap;
 import java.util.Map;
 
@@ -99,61 +96,15 @@ public class S3StorageService {
         }
     }
 
-    private byte[] convertAudioToBytes(float[] audioSamples, int sampleRate, AudioFormat format) throws IOException {
+    private byte[] convertAudioToBytes(float[] audioSamples, int sampleRate, AudioFormat format) throws Exception {
         switch (format) {
             case WAV:
-                return convertToWav(audioSamples, sampleRate);
+                return AudioPlayer.toWavBytes(audioSamples, sampleRate);
             case RAW:
-                return convertToRaw(audioSamples);
+                return AudioPlayer.toRawBytes(audioSamples);
             default:
-                return convertToWav(audioSamples, sampleRate);
+                return AudioPlayer.toWavBytes(audioSamples, sampleRate);
         }
-    }
-
-    private byte[] convertToWav(float[] audioSamples, int sampleRate) throws IOException {
-        ByteArrayOutputStream baos = new ByteArrayOutputStream();
-        writeWavHeader(baos, audioSamples.length, sampleRate);
-        for (float sample : audioSamples) {
-            short pcmSample = (short) (sample * 32767.0f);
-            baos.write(pcmSample & 0xFF);
-            baos.write((pcmSample >> 8) & 0xFF);
-        }
-        return baos.toByteArray();
-    }
-
-    private byte[] convertToRaw(float[] audioSamples) {
-        byte[] rawBytes = new byte[audioSamples.length * 4];
-        ByteBuffer buffer = ByteBuffer.wrap(rawBytes).order(ByteOrder.LITTLE_ENDIAN);
-        for (float sample : audioSamples) buffer.putFloat(sample);
-        return rawBytes;
-    }
-
-    private void writeWavHeader(ByteArrayOutputStream baos, int numSamples, int sampleRate) throws IOException {
-        baos.write("RIFF".getBytes());
-        writeInt(baos, 36 + numSamples * 2);
-        baos.write("WAVE".getBytes());
-        baos.write("fmt ".getBytes());
-        writeInt(baos, 16);
-        writeShort(baos, 1);
-        writeShort(baos, 1);
-        writeInt(baos, sampleRate);
-        writeInt(baos, sampleRate * 2);
-        writeShort(baos, 2);
-        writeShort(baos, 16);
-        baos.write("data".getBytes());
-        writeInt(baos, numSamples * 2);
-    }
-
-    private void writeInt(ByteArrayOutputStream baos, int value) throws IOException {
-        baos.write(value & 0xFF);
-        baos.write((value >> 8) & 0xFF);
-        baos.write((value >> 16) & 0xFF);
-        baos.write((value >> 24) & 0xFF);
-    }
-
-    private void writeShort(ByteArrayOutputStream baos, int value) throws IOException {
-        baos.write(value & 0xFF);
-        baos.write((value >> 8) & 0xFF);
     }
 
     private String getContentType(AudioFormat format) {

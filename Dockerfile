@@ -19,9 +19,12 @@ COPY --from=build /app/src/main/resources/*.txt ./resources/
 COPY --from=build /app/src/main/resources/cmudict* ./resources/
 
 # Environment variables
-ENV PORT=8080
+ENV PORT=9090
 ENV JAVA_OPTS="-Xmx512m -Xms256m"
 
-EXPOSE 8080
+EXPOSE 9090
+
+HEALTHCHECK --interval=30s --timeout=5s --start-period=15s --retries=3 \
+  CMD timeout 3 bash -c '</dev/tcp/localhost/9090' || exit 1
 
 ENTRYPOINT ["sh", "-c", "java $JAVA_OPTS -jar app.jar"]

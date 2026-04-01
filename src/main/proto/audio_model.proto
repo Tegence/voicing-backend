@@ -1,5 +1,8 @@
 syntax = "proto3";
 
+// API version: 1.0
+// Breaking changes require a major version bump.
+
 package org.example.voicingbackend.audiomodel;
 
 option java_multiple_files = true;
