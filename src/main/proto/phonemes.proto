@@ -8,6 +8,16 @@ option java_outer_classname = "PhonemeProto";
 
 service PhonemeService {
   rpc GetPhonemes (PhonemeRequest) returns (PhonemeResponse);
+  rpc Tokenize (TextRequest) returns (TokenResponse);
+}
+
+message TextRequest {
+  string text = 1;
+}
+
+message TokenResponse {
+  repeated int32 ids = 1;
+  int32 length = 2;
 }
 
 message LexiconEntry {

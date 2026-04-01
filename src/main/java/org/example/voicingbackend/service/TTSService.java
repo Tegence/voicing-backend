@@ -15,6 +15,7 @@ import ai.onnxruntime.OrtSession.SessionOptions;
 import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.example.voicingbackend.config.ConfigurationManager;
+import org.example.voicingbackend.util.PythonTtsClient;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -39,20 +40,32 @@ public class TTSService {
     private final String bakedVocabResource;
     private final int bakedSampleRate;
     private volatile java.util.Map<String, Integer> ipaVocab;
+    private volatile java.util.Map<String, Integer> vitsVocab;
+
+    // Vits ONNX
+    private final String vitsOnnxPath;
+    private final String vitsVocabResources;
+    private final PythonTtsClient ttsClient;
 
     public TTSService() {
         this.g2p = new TextToPhonemeService();
+        this.ttsClient = new PythonTtsClient();
         this.phonemeFormat = TextToPhonemeService.PhonemeFormat.ARPABET;
         ConfigurationManager cfg = ConfigurationManager.getInstance();
         this.fastspeechPath = cfg.getString("tts.fastspeech.path", "src/main/resources/fastspeech2_traced.pt");
         this.fastspeechOnnxPath = cfg.getString("tts.fastspeech.onnx.path", "");
         this.hifiganPath = cfg.getString("tts.hifigan.path", "src/main/resources/hifigan_ljspeech.onnx");
+        this.vitsOnnxPath = cfg.getString("tts.vits.onnx.path", "src/main/resources/vits_model.onnx");
         this.defaultSampleRate = cfg.getInt("tts.sample.rate", 22050);
+
 
         // Baked model defaults
         this.bakedOnnxPath = cfg.getString("tts.baked.onnx.path", "src/main/resources/baked_model.onnx");
         this.bakedVocabResource = cfg.getString("tts.baked.vocab.resource", "config_vocab_ipa.json");
         this.bakedSampleRate = 24000; // fixed by model spec
+
+        // Vits model
+        this.vitsVocabResources = cfg.getString("tts.vits.vocab.resource", "vits_vocab.json");
     }
 
     public static class Result {
@@ -60,15 +73,43 @@ public class TTSService {
         public final float[] audio;
         public final int sampleRate;
         public final String error;
+
         public Result(boolean success, float[] audio, int sampleRate, String error) {
-            this.success = success; this.audio = audio; this.sampleRate = sampleRate; this.error = error;
+            this.success = success;
+            this.audio = audio;
+            this.sampleRate = sampleRate;
+            this.error = error;
         }
     }
 
     public Result synthesize(String text, int sampleRate) {
         try {
             boolean tryBaked = bakedOnnxAvailable();
+            boolean tryVits = vitsOnnxAvailable();
             int sr = sampleRate > 0 ? sampleRate : (tryBaked ? bakedSampleRate : defaultSampleRate);
+
+            if (tryVits) {
+                try {
+                    long[] inputIds = ttsClient.fetchTokenIdsFromGrpc(text);
+
+                    if (inputIds != null && inputIds.length > 0) {
+
+                        float[] wav = runVitsOnnx(inputIds);
+
+                        if (wav != null && wav.length > 0) {
+                            return new Result(true, wav, defaultSampleRate, null);
+                        }
+                    }
+
+                    logger.warn("VITS inference failed, falling back");
+
+                } catch (Exception e) {
+
+                    logger.warn("VITS failed: {}, falling back", e.getMessage());
+
+                }
+
+            }
 
             // Prefer baked ONNX model if available
             if (tryBaked) {
@@ -129,6 +170,16 @@ public class TTSService {
         }
     }
 
+    private boolean vitsOnnxAvailable() {
+        try {
+            if (vitsOnnxPath == null || vitsOnnxPath.isBlank()) return false;
+            java.nio.file.Path p = resolvePathOrClasspath(vitsOnnxPath, ".onnx");
+            return p != null && java.nio.file.Files.exists(p);
+        } catch (Exception ignore) {
+            return false;
+        }
+    }
+
     private void ensureIpaVocabLoaded() {
         if (ipaVocab != null) return;
         synchronized (this) {
@@ -139,13 +190,34 @@ public class TTSService {
                     logger.warn("IPA vocab resource not found: {}", bakedVocabResource);
                 } else {
                     ObjectMapper om = new ObjectMapper();
-                    map = om.readValue(is, new TypeReference<java.util.Map<String, Integer>>(){});
+                    map = om.readValue(is, new TypeReference<java.util.Map<String, Integer>>() {
+                    });
                     logger.info("Loaded IPA vocab ({} entries) from {}", map.size(), bakedVocabResource);
                 }
             } catch (Exception e) {
                 logger.warn("Failed to load IPA vocab {}: {}", bakedVocabResource, e.getMessage());
             }
             this.ipaVocab = map;
+        }
+    }
+
+    private void ensureVitsVocabLoaded() {
+        if (vitsVocab != null) return;
+
+        synchronized (this) {
+            if (vitsVocab != null) return;
+
+            try (java.io.InputStream is = getClass().getClassLoader().getResourceAsStream(vitsVocabResources)) {
+
+                ObjectMapper mapper = new ObjectMapper();
+                vitsVocab = mapper.readValue(is, new TypeReference<java.util.Map<String, Integer>>() {
+                });
+
+                logger.info("Loaded VITS vocab size: {}", vitsVocab.size());
+
+            } catch (Exception e) {
+                throw new RuntimeException("Failed to load VITS vocab", e);
+            }
         }
     }
 
@@ -184,6 +256,38 @@ public class TTSService {
         return arr;
     }
 
+    private long[] buildVitsInputIds(java.util.List<String> phonemes) {
+
+        ensureVitsVocabLoaded();
+
+        java.util.List<Long> ids = new java.util.ArrayList<>();
+
+        int blankId = vitsVocab.get("_");
+
+        for (int i = 0; i < phonemes.size(); i++) {
+
+            String ph = phonemes.get(i);
+
+            Integer id = vitsVocab.get(ph);
+
+            if (id == null)
+                continue;
+
+            ids.add(id.longValue());
+
+            // insert blank between phonemes
+            if (i < phonemes.size() - 1)
+                ids.add((long) blankId);
+        }
+
+        long[] result = new long[ids.size()];
+
+        for (int i = 0; i < ids.size(); i++)
+            result[i] = ids.get(i);
+
+        return result;
+    }
+
     private float[] runBakedOnnx(long[] inputIds) throws Exception {
         java.nio.file.Path modelPath = resolvePathOrClasspath(bakedOnnxPath, ".onnx");
         java.nio.file.Path finalPath = modelPath != null ? modelPath : java.nio.file.Paths.get(bakedOnnxPath);
@@ -203,12 +307,12 @@ public class TTSService {
 
             // voice_id [1] (default 0 if present)
             if (inputNames.contains("voice_id")) {
-                long[] voice = new long[] { 0L };
+                long[] voice = new long[]{0L};
                 feeds.put("voice_id", OnnxTensor.createTensor(env, voice));
             }
             // speed [1] (optional default 1.0)
             if (inputNames.contains("speed")) {
-                float[] sp = new float[] { 1.0f };
+                float[] sp = new float[]{1.0f};
                 feeds.put("speed", OnnxTensor.createTensor(env, sp));
             }
 
@@ -243,9 +347,20 @@ public class TTSService {
             java.nio.file.Path modelPath = resolvePathOrClasspath(fastspeechPath, ".pt");
             model.load(modelPath != null ? modelPath : java.nio.file.Paths.get(fastspeechPath));
             Translator<NDList, NDList> translator = new Translator<NDList, NDList>() {
-                @Override public NDList processInput(TranslatorContext ctx, NDList input) { return input; }
-                @Override public NDList processOutput(TranslatorContext ctx, NDList list) { return list; }
-                @Override public ai.djl.translate.Batchifier getBatchifier() { return null; }
+                @Override
+                public NDList processInput(TranslatorContext ctx, NDList input) {
+                    return input;
+                }
+
+                @Override
+                public NDList processOutput(TranslatorContext ctx, NDList list) {
+                    return list;
+                }
+
+                @Override
+                public ai.djl.translate.Batchifier getBatchifier() {
+                    return null;
+                }
             };
             try (ai.djl.inference.Predictor<NDList, NDList> predictor = model.newPredictor(translator)) {
                 NDArray tok = manager.create(padded).reshape(1, FIXED_SEQUENCE_LENGTH).toType(DataType.INT64, false);
@@ -253,7 +368,7 @@ public class TTSService {
                 NDArray mel = outList.get(0);
                 if (mel.getShape().dimension() < 3) {
                     logger.warn("FastSpeech2 output shape unexpected: {}", mel.getShape());
-                    return new float[][][] { new float[80][100] };
+                    return new float[][][]{new float[80][100]};
                 }
                 long b = mel.getShape().get(0);
                 long c = mel.getShape().get(1);
@@ -268,7 +383,7 @@ public class TTSService {
             }
         } catch (Exception e) {
             logger.warn("FastSpeech2 failed: {}", e.getMessage());
-            return new float[][][] { new float[80][100] };
+            return new float[][][]{new float[80][100]};
         }
     }
 
@@ -286,9 +401,20 @@ public class TTSService {
             }
             model.load(modelPath);
             Translator<NDList, NDList> translator = new Translator<NDList, NDList>() {
-                @Override public NDList processInput(TranslatorContext ctx, NDList input) { return input; }
-                @Override public NDList processOutput(TranslatorContext ctx, NDList list) { return list; }
-                @Override public ai.djl.translate.Batchifier getBatchifier() { return null; }
+                @Override
+                public NDList processInput(TranslatorContext ctx, NDList input) {
+                    return input;
+                }
+
+                @Override
+                public NDList processOutput(TranslatorContext ctx, NDList list) {
+                    return list;
+                }
+
+                @Override
+                public ai.djl.translate.Batchifier getBatchifier() {
+                    return null;
+                }
             };
             try (ai.djl.inference.Predictor<NDList, NDList> predictor = model.newPredictor(translator)) {
                 NDArray tokFlat = manager.create(tokens).toType(DataType.INT64, false); // [T]
@@ -324,7 +450,7 @@ public class TTSService {
                         return out;
                     } else {
                         logger.warn("Unexpected 2D FS2 ONNX shape: {}", mel.getShape());
-                        return new float[][][] { new float[80][100] };
+                        return new float[][][]{new float[80][100]};
                     }
                 } else if (dims == 3) {
                     long d0 = mel.getShape().get(0);
@@ -346,11 +472,11 @@ public class TTSService {
                         return out;
                     } else {
                         logger.warn("Unexpected 3D FS2 ONNX shape: {}", mel.getShape());
-                        return new float[][][] { new float[80][100] };
+                        return new float[][][]{new float[80][100]};
                     }
                 } else {
                     logger.warn("Unexpected FS2 ONNX output dims: {}", dims);
-                    return new float[][][] { new float[80][100] };
+                    return new float[][][]{new float[80][100]};
                 }
             }
         } catch (Exception e) {
@@ -402,11 +528,14 @@ public class TTSService {
         }
     }
 
+
+
     private java.nio.file.Path resolvePathOrClasspath(String configuredPath, String expectedExt) {
         try {
             java.nio.file.Path p = java.nio.file.Paths.get(configuredPath);
             if (java.nio.file.Files.exists(p)) return p;
-        } catch (Exception ignore) { }
+        } catch (Exception ignore) {
+        }
         try (java.io.InputStream is = getClass().getClassLoader().getResourceAsStream(configuredPath)) {
             if (is != null) {
                 java.nio.file.Path tmp = java.nio.file.Files.createTempFile("tts-model", expectedExt);
@@ -419,6 +548,47 @@ public class TTSService {
         }
         return null;
     }
-}
 
+    private float[] runVitsOnnx(long[] inputIds) throws Exception {
+        java.nio.file.Path modelPath = resolvePathOrClasspath(vitsOnnxPath, ".onnx");
+        java.nio.file.Path finalPath = modelPath != null ? modelPath : java.nio.file.Paths.get(vitsOnnxPath);
+
+        try (OrtEnvironment env = OrtEnvironment.getEnvironment();
+             SessionOptions opts = new SessionOptions();
+             OrtSession session = env.createSession(finalPath.toString(), opts)) {
+
+            // input [1, T]
+            long[][] ids2d = new long[1][inputIds.length];
+            System.arraycopy(inputIds, 0, ids2d[0], 0, inputIds.length);
+
+            // input_lengths [1]
+            long[] inputLengths = new long[]{inputIds.length};
+
+            // scales [3] — noise_scale, length_scale, noise_scale_w
+            float[] scales = new float[]{1.0f, 1.8f, 1.0f};
+
+            java.util.Map<String, OnnxTensor> feeds = new java.util.HashMap<>();
+            feeds.put("input", OnnxTensor.createTensor(env, ids2d));
+            feeds.put("input_lengths", OnnxTensor.createTensor(env, inputLengths));
+            feeds.put("scales", OnnxTensor.createTensor(env, scales));
+
+            try (OrtSession.Result result = session.run(feeds)) {
+                OnnxTensor t = (OnnxTensor) result.get(0);
+                long[] shape = t.getInfo().getShape();
+
+                if (shape.length == 1) return (float[]) t.getValue();
+                if (shape.length == 2 && shape[0] == 1) return ((float[][]) t.getValue())[0];
+                if (shape.length == 3 && shape[0] == 1 && shape[1] == 1) return ((float[][][]) t.getValue())[0][0];
+
+                // fallback flatten
+                return t.getFloatBuffer().array();
+            }
+        }
+    }
+
+    private byte[] toWavBytes(float[] samples, int sampleRate) throws Exception {
+        return org.example.voicingbackend.util.AudioPlayer.toWavBytes(samples, sampleRate);
+    }
+
+}
 

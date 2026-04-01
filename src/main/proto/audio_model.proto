@@ -54,6 +54,22 @@ service AudioModelService {
   
   // Unload the current model
   rpc UnloadModel (UnloadModelRequest) returns (UnloadModelResponse);
+
+  // Text to speech
+  rpc TextToSpeechVits (TextToSpeechvitsRequest) returns (TextToSpeechvitsResponse);
+}
+
+// Text to Speech request
+message TextToSpeechvitsRequest {
+  string text = 1;
+}
+
+// Text to Speech Response
+message TextToSpeechvitsResponse {
+  bool success = 1;
+  repeated float samples = 2;
+  int32 sample_rate = 3;
+  string error_message = 4;
 }
 
 // User registration request

@@ -59,9 +59,9 @@ public class ConfigurationManager {
         properties.setProperty("audio.max.file.size.mb", "100");
         properties.setProperty("server.port", "9090");
         properties.setProperty("server.host", "0.0.0.0");
-        properties.setProperty("mongodb.connection.string", "mongodb://localhost:27017");
-        properties.setProperty("mongodb.database.name", "voicing_backend");
-        properties.setProperty("jwt.secret.key", "your-secret-key-should-be-at-least-256-bits-long-for-production");
+        properties.setProperty("mongodb.connection.string", "${MONGODB_CONNECTION_STRING:mongodb://localhost:27017}");
+        properties.setProperty("mongodb.database.name", "${MONGODB_DATABASE_NAME:voicing_backend}");
+        properties.setProperty("jwt.secret.key", "${JWT_SECRET_KEY:change-me-in-production}");
         properties.setProperty("jwt.expiration.hours", "24");
     }
     
@@ -196,7 +196,7 @@ public class ConfigurationManager {
     }
     
     public String getMongoDbConnectionString() {
-        return getString("mongodb.connection.string", "mongodb://localhost:27017");
+        return getString("mongodb.connection.string", "${MONGODB_CONNECTION_STRING:mongodb://localhost:27017}");
     }
     
     public String getMongoDbDatabaseName() {
@@ -212,10 +212,10 @@ public class ConfigurationManager {
     }
 
     // AWS / S3
-    public String getAwsRegion() { return getString("aws.region", ""); }
-    public String getS3BucketName() { return getString("s3.bucket.name", ""); }
-    public String getAwsAccessKeyId() { return getString("aws.accessKeyId", ""); }
-    public String getAwsSecretAccessKey() { return getString("aws.secretAccessKey", ""); }
+    public String getAwsRegion() { return getString("aws.region", "eu-north-1"); }
+    public String getS3BucketName() { return getString("s3.bucket.name", "voicing-audio-bucket"); }
+    public String getAwsAccessKeyId() { return getString("aws.accessKeyId", "${AWS_ACCESS_KEY_ID:}"); }
+    public String getAwsSecretAccessKey() { return getString("aws.secretAccessKey", "${AWS_SECRET_ACCESS_KEY:}"); }
     public String getS3Endpoint() { return getString("s3.endpoint", ""); } // optional for S3-compatible
 
     // Verification threshold (%): 0-100

@@ -31,7 +31,7 @@ public class MongoUserRepository implements UserRepository {
         ConfigurationManager config = ConfigurationManager.getInstance();
         
         // Get MongoDB connection string from configuration
-        String connectionString = config.getString("mongodb.connection.string", "mongodb://localhost:27017");
+        String connectionString = config.getString("mongodb.connection.string", "${MONGODB_CONNECTION_STRING:mongodb://localhost:27017}");
         String databaseName = config.getString("mongodb.database.name", "voicing_backend");
         
         logger.info("Connecting to MongoDB: {}", connectionString);

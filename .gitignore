@@ -4,10 +4,7 @@ target/
 !**/src/test/**/target/
 
 ### IntelliJ IDEA ###
-.idea/modules.xml
-.idea/jarRepositories.xml
-.idea/compiler.xml
-.idea/libraries/
+.idea/
 *.iws
 *.iml
 *.ipr
@@ -47,3 +44,8 @@ build/
 .env
 .env.*
 !.env.example
+test.wav
+src/main/resources/baked_model.onnx
+src/main/resources/fastspeech2_ljspeech.onnx
+src/main/resources/fastspeech2_traced.pt
+src/main/resources/hifigan_ljspeech.onnx
